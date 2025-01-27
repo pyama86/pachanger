@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	targetFile string
-	newPkg     string
-	outputDir  string
-	workDir    string
+	targetFile   string
+	newPkg       string
+	outputDir    string
+	workDir      string
+	deletePrefix string
 )
 
 var rootCmd = &cobra.Command{
@@ -57,6 +58,7 @@ func init() {
 	rootCmd.Flags().StringVar(&newPkg, "new", "", "New package name (required)")
 	rootCmd.Flags().StringVar(&outputDir, "output", "", "Output directory for modified files (default: same as input file)")
 	rootCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory(default: current directory)")
+	rootCmd.Flags().StringVar(&deletePrefix, "delete-prefix", "", "Delete prefix of Symbol")
 
 	rootCmd.AddCommand(versionCmd)
 }
@@ -120,7 +122,7 @@ func run(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	err = pachanger.ProcessTargetFile(fs, node, pkg.TypesInfo, absTargetFile, absOutputFile, newPkg)
+	err = pachanger.ProcessTargetFile(fs, node, pkg.TypesInfo, absTargetFile, absOutputFile, newPkg, deletePrefix)
 	if err != nil {
 		slog.ErrorContext(ctx, "Error processing target file",
 			slog.String("file", absTargetFile), slog.Any("error", err))
@@ -149,7 +151,7 @@ func run(cmd *cobra.Command, _ []string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			return pachanger.ProcessOtherFiles(fs, node, pkg.TypesInfo, path, absTargetFile, absOutputFile, newPkg)
+			return pachanger.ProcessOtherFiles(fs, node, pkg.TypesInfo, path, absTargetFile, absOutputFile, newPkg, deletePrefix)
 		})
 		return nil
 	})
