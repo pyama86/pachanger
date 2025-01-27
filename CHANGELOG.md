@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.3](https://github.com/pyama86/pachanger/compare/v0.0.2...v0.0.3) - 2025-01-27
+- Release for v0.0.2 by @github-actions in https://github.com/pyama86/pachanger/pull/9
+
 ## [v0.0.2](https://github.com/pyama86/pachanger/compare/v0.0.1...v0.0.2) - 2025-01-27
 - Release for v0.0.1 by @github-actions in https://github.com/pyama86/pachanger/pull/6
 - Release for v0.0.1 by @github-actions in https://github.com/pyama86/pachanger/pull/7
