@@ -29,7 +29,7 @@ Alternatively, you can clone the repository and build the binary manually:
 ### Basic Command
 
 ```sh
-    pachanger --file <target-file> --new <new-package-name> [--output <output-directory>] [--workdir <working-directory>]
+% pachanger --file <target-file> --new <new-package-name> [--output <output-directory>] [--workdir <working-directory>]
 ```
 
 ### Options
