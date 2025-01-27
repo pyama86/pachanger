@@ -127,7 +127,6 @@ func transformTargetAST(fs *token.FileSet, file *ast.File, newPkg, oldFile, dele
 					return true
 				})
 			}
-
 		case *ast.TypeSpec:
 			if fixExprInTarget(fs, node.Name, oldPkg, oldFile, deletePrefix, typesInfos, history) {
 				modified = true
@@ -166,7 +165,6 @@ func fixExprInTarget(fs *token.FileSet, node ast.Node, oldPkg, oldFile, deletePr
 				}
 			})
 		}
-
 	case *ast.StarExpr:
 		if pkgIdent, ok := node.X.(*ast.Ident); ok {
 			if isUpperCamelCase(pkgIdent.Name) {
@@ -207,7 +205,6 @@ func fixExprInTarget(fs *token.FileSet, node ast.Node, oldPkg, oldFile, deletePr
 		if fixExprInTarget(fs, node.Type, oldPkg, oldFile, deletePrefix, typesInfos, history) {
 			mod = true
 		}
-
 	}
 	return mod
 }
@@ -358,6 +355,7 @@ func updateTypeNameTargetFile(fs *token.FileSet, typeInfos *types.Info, e *ast.I
 	pkgName, typePos := getType(fs, typeInfos, e)
 	if pkgName != "" {
 		if pkgName == oldPkg {
+			fmt.Printf("oldFile: %s, typePos.Filename: %s\n", oldFile, typePos.Filename)
 			updateFunc(e, oldFile == typePos.Filename)
 			return true
 		}
