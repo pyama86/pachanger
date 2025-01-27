@@ -22,3 +22,5 @@ jobs:
       - id: run-tagpr
         name: Run tagpr
         uses: Songmu/tagpr@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
