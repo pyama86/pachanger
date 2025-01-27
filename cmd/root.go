@@ -74,6 +74,13 @@ func run(cmd *cobra.Command, _ []string) {
 		return
 	}
 
+	// workDirにgo.modが存在するか確認
+	if _, err := os.Stat(filepath.Join(absWorkDir, "go.mod")); err != nil {
+		slog.ErrorContext(ctx, "go.mod not found in workdir",
+			slog.String("workDir", absWorkDir), slog.Any("error", err))
+		return
+	}
+
 	if tagsFlag != "" {
 		buildFlags = append(buildFlags, "-tags", tagsFlag)
 	}
