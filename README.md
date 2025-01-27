@@ -13,7 +13,7 @@ You can install pachanger using Go:
 
 ### Homebrew
 ```sh
-% brew install pyama86/tap/pachanger
+% brew install pyama86/homebrew-ptools/pachanger
 ```
 
 Alternatively, you can clone the repository and build the binary manually:
