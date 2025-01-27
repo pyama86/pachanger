@@ -1,0 +1,25 @@
+builds:
+  - binary: pachanger
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      -X github.com/pyama86/pachanger/cmd.version={{.Version}}
+brews:
+  -
+    name: pachanger
+    repository:
+      owner: pyama86
+      name: homebrew-ptools
+    commit_author:
+      name: goreleaserbot
+      email: goreleaser@carlosbecker.com
+    description: "pachanger is a tool to change the package name of Go source code."
+    homepage: "https://github.com/pyama86/pachanger"
+    install: |
+      bin.install Dir['pachanger']
+    test: |
+      system "#{bin}/pachanger"
