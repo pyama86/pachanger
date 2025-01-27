@@ -1,9 +1,10 @@
 package pachanger
 
 import (
-	"fmt"
+	"bytes"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"go/types"
 	"testing"
@@ -11,6 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func nodeToString(node *ast.File) (string, error) {
+	var buf bytes.Buffer
+	fs := token.NewFileSet()
+	if err := printer.Fprint(&buf, fs, node); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
 func parseGoSource(src string) (*ast.File, *token.FileSet, error) {
 	fs := token.NewFileSet()
 	node, err := parser.ParseFile(fs, "", src, parser.AllErrors)
@@ -53,12 +62,10 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File, exampleDefFile string) (*t
 				typeFileMap[ident.Name] = exampleDefFile
 				info.Defs[ident] = exampleObjTypeWithType
 				info.Uses[ident] = exampleObjTypeWithType
-				fmt.Printf("Mocked type: %s, Pos: %v, File: %s\n", ident.Name, fs.Position(token.Pos(examplePos)), exampleDefFile)
 			} else if ident.Name == "ModelExample" {
 				typeFileMap[ident.Name] = "model/model_example.go"
 				info.Defs[ident] = modelObjTypeWithType
 				info.Uses[ident] = modelObjTypeWithType
-				fmt.Printf("Mocked type: %s, Pos: %v, File: %s\n", ident.Name, fs.Position(token.Pos(examplePos)), "model/model_example.go")
 			} else if pos.IsValid() {
 				typeFileMap[ident.Name] = pos.Filename
 			}
@@ -71,11 +78,12 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File, exampleDefFile string) (*t
 
 func TestTransformTargetAST(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		oldPkg      string
-		newPkg      string
-		expectMatch string
+		name         string
+		input        string
+		oldPkg       string
+		newPkg       string
+		deletePrefix string
+		expectMatch  string
 	}{
 		{
 			name:   "Example 型のパッケージ移動",
@@ -162,7 +170,7 @@ var modelExamples []ModelExample
 `,
 			expectMatch: `
 package example
-var examples []example.Example
+var examples []Example
 var modelExamples []model.ModelExample
 `,
 		},
@@ -177,7 +185,7 @@ var modelExamplePtr *ModelExample
 `,
 			expectMatch: `
 package example
-var examplePtr *example.Example
+var examplePtr *Example
 var modelExamplePtr *model.ModelExample
 `,
 		},
@@ -191,7 +199,26 @@ var exampleMap map[Example]ModelExample
 `,
 			expectMatch: `
 package example
-var exampleMap map[example.Example]model.ModelExample
+var exampleMap map[Example]model.ModelExample
+`,
+		},
+
+		{
+			name:         "ModelExample 型のパッケージ移動とプレフィックス削除",
+			oldPkg:       "model",
+			newPkg:       "example",
+			deletePrefix: "Model",
+			input: `
+package model
+type Example struct {
+	modelExample ModelExample
+}
+`,
+			expectMatch: `
+package example
+type Example struct {
+	modelExample model.Example
+}
 `,
 		},
 	}
@@ -203,25 +230,31 @@ var exampleMap map[example.Example]model.ModelExample
 
 			typesInfo, _ := mockTypesInfo(fs, node, "model/example/example.go")
 
-			_, err = transformTargetAST(fs, node, tt.newPkg, "model/example.go", typesInfo)
+			_, err = transformTargetAST(fs, node, tt.newPkg, "model/example.go", tt.deletePrefix, typesInfo)
 			assert.NoError(t, err)
 
 			expectedNode, _, err := parseGoSource(tt.expectMatch)
 			assert.NoError(t, err)
 
 			assert.Equal(t, expectedNode.Name.Name, node.Name.Name)
+			nodeStr, err := nodeToString(node)
+			assert.NoError(t, err)
+			expectedStr, err := nodeToString(expectedNode)
+			assert.NoError(t, err)
+			assert.Equal(t, expectedStr, nodeStr)
 		})
 	}
 }
 
 func TestTransformOtherFileAST(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		oldPkg      string
-		newPkg      string
-		exampleDef  string
-		expectMatch string
+		name         string
+		input        string
+		oldPkg       string
+		newPkg       string
+		deletePrefix string
+		exampleDef   string
+		expectMatch  string
 	}{
 		{
 			name:       "Example 型を model から example に移動",
@@ -381,6 +414,26 @@ package model
 var sliceChan chan []example.Example
 `,
 		},
+
+		{
+			name:         "ExampleのPrefixを削除",
+			oldPkg:       "model",
+			newPkg:       "example",
+			exampleDef:   "model/testfile.go",
+			deletePrefix: "Ex",
+			input: `
+package model
+type TestStruct struct {
+	Example
+}
+`,
+			expectMatch: `
+package model
+type TestStruct struct {
+	example.ample
+}
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -390,7 +443,7 @@ var sliceChan chan []example.Example
 
 			typesInfo, _ := mockTypesInfo(fs, node, tt.exampleDef)
 
-			modified, err := transformOtherFileAST(fs, node, tt.newPkg, "model/testfile.go", typesInfo)
+			modified, err := transformOtherFileAST(fs, node, tt.newPkg, "model/testfile.go", tt.deletePrefix, typesInfo)
 			assert.NoError(t, err)
 			assert.True(t, modified)
 
@@ -398,6 +451,13 @@ var sliceChan chan []example.Example
 			assert.NoError(t, err)
 
 			assert.Equal(t, expectedNode.Name.Name, node.Name.Name)
+
+			nodeStr, err := nodeToString(node)
+			assert.NoError(t, err)
+			expectedStr, err := nodeToString(expectedNode)
+			assert.NoError(t, err)
+			assert.Equal(t, expectedStr, nodeStr)
+
 		})
 	}
 }
