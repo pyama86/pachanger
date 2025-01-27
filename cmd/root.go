@@ -202,10 +202,12 @@ func run(cmd *cobra.Command, _ []string) {
 	}
 
 	// ターゲットファイルを削除
-	if err := os.Remove(absTargetFile); err != nil {
-		slog.ErrorContext(ctx, "Failed to remove target file",
-			slog.String("file", absTargetFile), slog.Any("error", err))
-		return
+	if absTargetFile != absOutputFile {
+		if err := os.Remove(absTargetFile); err != nil {
+			slog.ErrorContext(ctx, "Failed to remove target file",
+				slog.String("file", absTargetFile), slog.Any("error", err))
+			return
+		}
 	}
 
 	slog.InfoContext(ctx, "Successfully updated references", slog.String("outputPath", absOutputFile))
