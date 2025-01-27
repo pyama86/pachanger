@@ -21,7 +21,6 @@ import (
 type Transformer struct {
 	fs           *token.FileSet
 	oldFile      string
-	absOutput    string
 	oldPkg       string
 	newPkg       string
 	deletePrefix string
@@ -31,12 +30,11 @@ type Transformer struct {
 // NewTransformer は Transformer 構造体を生成します。
 func NewTransformer(
 	fs *token.FileSet,
-	workDir, oldFile, absOutput, oldPkg, newPkg, deletePrefix string,
+	workDir, oldFile, oldPkg, newPkg, deletePrefix string,
 ) *Transformer {
 	return &Transformer{
 		fs:           fs,
 		oldFile:      oldFile,
-		absOutput:    absOutput,
 		oldPkg:       oldPkg,
 		newPkg:       newPkg,
 		deletePrefix: deletePrefix,
@@ -69,7 +67,7 @@ func FindPackageForFile(fs *token.FileSet, pkgs []*packages.Package, absTargetFi
 }
 
 // WriteFile は変更後の AST をフォーマットし、インポート整理しつつ指定パスへ書き出す。
-func (t *Transformer) writeFile(node *ast.File) error {
+func (t *Transformer) writeFile(node *ast.File, output string) error {
 	originalDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %v", err)
@@ -95,7 +93,7 @@ func (t *Transformer) writeFile(node *ast.File) error {
 		return err
 	}
 
-	formatted, err := imports.Process(t.absOutput, buf.Bytes(), &imports.Options{
+	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
 		Comments:   true,
 		TabWidth:   4,
 		Fragment:   false,
@@ -103,13 +101,13 @@ func (t *Transformer) writeFile(node *ast.File) error {
 	})
 
 	if err != nil {
-		_ = os.WriteFile(t.absOutput, buf.Bytes(), 0644)
+		_ = os.WriteFile(output, buf.Bytes(), 0644)
 
 		return fmt.Errorf("failed to format and manage imports: %v", err)
 	}
 
-	if err := os.WriteFile(t.absOutput, formatted, 0644); err != nil {
-		return fmt.Errorf("failed to write file %s: %v", t.absOutput, err)
+	if err := os.WriteFile(output, formatted, 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %v", output, err)
 	}
 
 	return nil
@@ -117,7 +115,7 @@ func (t *Transformer) writeFile(node *ast.File) error {
 
 // TransformSymbolsInTargetFile は、ターゲットファイル内のパッケージ名・シンボル名を変換します。
 // 変換があった場合、あるいは出力先ファイルが存在しない場合は新たにファイルを書き込みます。
-func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *types.Info) error {
+func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *types.Info, output string) error {
 
 	modified, err := t.transformInTargetFile(node, typeInfo)
 	if err != nil {
@@ -125,8 +123,8 @@ func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *typ
 	}
 
 	// ファイルが存在しないか、modified == true の場合に書き出す
-	if _, err := os.Stat(t.absOutput); err != nil || modified {
-		if werr := t.writeFile(node); werr != nil {
+	if _, err := os.Stat(output); err != nil || modified {
+		if werr := t.writeFile(node, output); werr != nil {
 			return werr
 		}
 	}
@@ -135,14 +133,14 @@ func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *typ
 
 // TransformSymbolsInOtherFile はターゲットファイルのシンボルを参照している可能性のある他ファイルに対して、シンボルを変換します。
 // 変換があった場合のみ上書き保存します。
-func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *types.Info, filename string) error {
+func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *types.Info, output string) error {
 	modified, err := t.transformInOtherFile(node, typeInfo)
 	if err != nil {
 		return err
 	}
 
 	if modified {
-		return t.writeFile(node)
+		return t.writeFile(node, output)
 	}
 	return nil
 }

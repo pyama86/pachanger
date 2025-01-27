@@ -7,6 +7,8 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"log"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -301,9 +303,13 @@ type TestAlias struct {
 			assert.NoError(t, err)
 
 			typesInfo, _ := mockTypesInfo(fs, node)
+			cdir, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
 
 			// Transformerを作成（outputFileはテストでは未使用なのでダミーでOK）
-			transformer := NewTransformer(fs, tt.oldFile, "ignored_output.go", tt.oldPkg, tt.newPkg, tt.deletePrefix)
+			transformer := NewTransformer(fs, cdir, tt.oldFile, tt.oldPkg, tt.newPkg, tt.deletePrefix)
 			_, err = transformer.transformInTargetFile(node, typesInfo)
 			assert.NoError(t, err)
 
@@ -495,10 +501,14 @@ func Check(x interface{}) string {
 			node, fs, err := parseGoSource(tt.input)
 			assert.NoError(t, err)
 
+			cdir, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
 			typesInfo, _ := mockTypesInfo(fs, node)
 
 			// Transformerを作成
-			transformer := NewTransformer(fs, tt.oldFile, "ignored_output.go", tt.oldPkg, tt.newPkg, tt.deletePrefix)
+			transformer := NewTransformer(fs, cdir, tt.oldFile, tt.oldPkg, tt.newPkg, tt.deletePrefix)
 
 			_, err = transformer.transformInOtherFile(node, typesInfo)
 			assert.NoError(t, err)

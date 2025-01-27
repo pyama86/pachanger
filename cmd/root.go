@@ -139,13 +139,12 @@ func run(cmd *cobra.Command, _ []string) {
 		fs,
 		absWorkDir,
 		absTargetFile,
-		absOutputFile,
 		oldPkg,
 		newPkg,
 		deletePrefix,
 	)
 
-	if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo); err != nil {
+	if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {
 		slog.ErrorContext(ctx, "Error transforming target file",
 			slog.String("file", absTargetFile), slog.Any("error", err))
 		return
@@ -192,6 +191,13 @@ func run(cmd *cobra.Command, _ []string) {
 
 	if err := g.Wait(); err != nil {
 		slog.ErrorContext(ctx, "Error updating references", slog.Any("error", err))
+		return
+	}
+
+	// ターゲットファイルを削除
+	if err := os.Remove(absTargetFile); err != nil {
+		slog.ErrorContext(ctx, "Failed to remove target file",
+			slog.String("file", absTargetFile), slog.Any("error", err))
 		return
 	}
 
