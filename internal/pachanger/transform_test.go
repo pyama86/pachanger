@@ -41,7 +41,7 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File) (*types.Info, map[string]s
 	modelExampleFile := fs.AddFile("model/model/example.go", -1, 1000)
 	modelExamplePos := token.Pos(modelExampleFile.Base() + 1)
 
-	examplePkg := types.NewPackage("example", "example")
+	examplePkg := types.NewPackage("model", "model")
 	modelPkg := types.NewPackage("model", "model")
 
 	emptyStruct := types.NewStruct(nil, nil)
@@ -102,7 +102,7 @@ type Example struct {}
 `,
 		},
 		{
-			name:   "Example は example.Example に変換され、ModelExample は model.ModelExample のまま（構造体の埋め込み）",
+			name:   "ModelExampleは mode.ModelExample に変換され、Example は model.Example のまま（構造体の埋め込み）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -121,7 +121,7 @@ type TestStruct struct {
 `,
 		},
 		{
-			name:   "Example は example.Example に変換されるが ModelExample は変換されない（関数の戻り値）",
+			name:   "ModelExampleは mode.ModelExample に変換されるが ModelExample は変換されない（関数の戻り値）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -144,7 +144,7 @@ func CreateModel() model.ModelExample {
 `,
 		},
 		{
-			name:   "Example は example.Example に変換され、ModelExample は model.ModelExample のまま（メソッドの引数）",
+			name:   "ModelExampleは mode.ModelExample に変換され、ModelExample は model.ModelExample のまま（メソッドの引数）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -163,7 +163,7 @@ func (s TestStruct) SetModelExample(me model.ModelExample) {
 `,
 		},
 		{
-			name:   "Example は example.Example に変換されるが ModelExample は変換されない（スライス）",
+			name:   "ModelExample は model.Example に変換されるが Example は変換されない（スライス）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -178,7 +178,7 @@ var modelExamples []model.ModelExample
 `,
 		},
 		{
-			name:   "Example は example.Example に変換されるが ModelExample は変換されない（ポインタ型）",
+			name:   "ModelExample は model.Example に変換されるが Example は変換されない（ポインタ型）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -193,7 +193,7 @@ var modelExamplePtr *model.ModelExample
 `,
 		},
 		{
-			name:   "Example は example.Example に変換されるが ModelExample は変換されない（mapのキーと値）",
+			name:   "ModelExample は model.ModelExample に変換されるが Example は変換されない（mapのキーと値）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -208,17 +208,17 @@ var exampleMap map[Example]model.ModelExample
 
 		{
 			name:         "Example 型のパッケージ移動とプレフィックス削除",
-			oldPkg:       "example",
-			newPkg:       "model",
+			oldPkg:       "model",
+			newPkg:       "example",
 			deletePrefix: "E",
 			input: `
-package example
+package model
 type Sample struct {
 	modelExample Example
 }
 `,
 			expectMatch: `
-package model
+package example
 type Sample struct {
 	modelExample xample
 }
@@ -407,7 +407,7 @@ var sliceChan chan []example.ModelExample
 		},
 
 		{
-			name:         "ExampleのPrefixを削除",
+			name:         "ModelExampleのPrefixを削除",
 			oldPkg:       "model",
 			newPkg:       "example",
 			deletePrefix: "M",
