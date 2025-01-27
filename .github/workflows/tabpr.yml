@@ -1,16 +1,24 @@
+# .github/workflows/tagpr.yml
+
 name: tagpr
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+
 jobs:
-  deploy:
+  tagpr:
     runs-on: ubuntu-latest
+    outputs:
+      tagpr-tag: ${{ steps.run-tagpr.outputs.tag }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: Songmu/tagpr@main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: haya14busa/action-update-semver@v1
-        if: "steps.tagpr.outputs.tag != ''"
+      - name: Check out code
+        uses: actions/checkout@v4
         with:
-          tag: ${{ steps.tagpr.outputs.tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: run-tagpr
+        name: Run tagpr
+        uses: Songmu/tagpr@main
