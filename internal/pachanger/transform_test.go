@@ -443,7 +443,7 @@ type TestStruct struct {
 
 			typesInfo, _ := mockTypesInfo(fs, node, tt.exampleDef)
 
-			modified, err := transformOtherFileAST(fs, node, tt.newPkg, "model/testfile.go", tt.deletePrefix, typesInfo)
+			modified, err := transformOtherFileAST(fs, node, "model/testfile.go", tt.oldPkg, tt.newPkg, tt.deletePrefix, typesInfo)
 			assert.NoError(t, err)
 			assert.True(t, modified)
 

@@ -19,7 +19,7 @@ import (
 var (
 	targetFile   string
 	newPkg       string
-	outputDir    string
+	outputPath   string
 	workDir      string
 	deletePrefix string
 )
@@ -56,7 +56,7 @@ func init() {
 	}
 	rootCmd.Flags().StringVar(&targetFile, "file", "", "Target file to rename package (required)")
 	rootCmd.Flags().StringVar(&newPkg, "new", "", "New package name (required)")
-	rootCmd.Flags().StringVar(&outputDir, "output", "", "Output directory for modified files (default: same as input file)")
+	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path(default: same directory as target file)")
 	rootCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory(default: current directory)")
 	rootCmd.Flags().StringVar(&deletePrefix, "delete-prefix", "", "Delete prefix of Symbol")
 
@@ -77,40 +77,46 @@ func run(cmd *cobra.Command, _ []string) {
 		absTargetFile = path.Join(absWorkDir, targetFile)
 	}
 
-	if outputDir == "" {
-		outputDir = filepath.Dir(absTargetFile)
+	if outputPath == "" {
+		outputPath = path.Join(filepath.Dir(absTargetFile), filepath.Base(absTargetFile))
 	}
 
-	if !filepath.IsAbs(outputDir) {
-		outputDir = path.Join(absWorkDir, outputDir)
+	if !filepath.IsAbs(outputPath) {
+		outputPath = path.Join(absWorkDir, outputPath)
 	}
 
-	absOutputDir, err := filepath.Abs(outputDir)
+	// ディレクトリならば
+	info, err := os.Stat(outputPath)
+	if err == nil {
+		if info.IsDir() {
+			outputPath = path.Join(outputPath, filepath.Base(absTargetFile))
+		}
+	}
+
+	absOutputFile, err := filepath.Abs(outputPath)
 	if err != nil {
-		slog.ErrorContext(ctx, "Failed to determine absolute output path",
-			slog.String("outputDir", outputDir), slog.Any("error", err))
+		slog.ErrorContext(ctx, "Failed to determine absolute output path", slog.String("outputPath", outputPath), slog.Any("error", err))
 		return
 	}
 
-	if err := os.MkdirAll(absOutputDir, os.ModePerm); err != nil {
-		slog.ErrorContext(ctx, "Failed to create output directory",
-			slog.String("outputDir", absOutputDir), slog.Any("error", err))
+	if err := os.MkdirAll(filepath.Dir(absOutputFile), 0755); err != nil {
+		slog.ErrorContext(ctx, "Failed to create output directory", slog.String("dir", filepath.Dir(absOutputFile)), slog.Any("error", err))
 		return
 	}
-
-	absOutputFile := filepath.Join(outputDir, filepath.Base(absTargetFile))
 
 	// 既にファイルがあれば削除
-	if err := os.Remove(absOutputFile); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.ErrorContext(ctx, "Failed to remove existing file",
-				slog.String("file", absOutputFile), slog.Any("error", err))
-			return
+	if absTargetFile != absOutputFile {
+		if err := os.Remove(absOutputFile); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				slog.ErrorContext(ctx, "Failed to remove existing file",
+					slog.String("file", absOutputFile), slog.Any("error", err))
+				return
+			}
 		}
 	}
 
 	fs := token.NewFileSet()
-	allPkg, err := pachanger.GetPackages(fs, absWorkDir, "./...")
+	allPkg, err := pachanger.GetPackages(fs, absWorkDir)
 	if err != nil {
 		slog.ErrorContext(ctx, "Error getting packages", slog.Any("error", err))
 		return
@@ -121,6 +127,7 @@ func run(cmd *cobra.Command, _ []string) {
 		slog.ErrorContext(ctx, "Error filtering package", slog.Any("error", err))
 		return
 	}
+	oldPkg := pkg.Name
 
 	err = pachanger.ProcessTargetFile(fs, node, pkg.TypesInfo, absTargetFile, absOutputFile, newPkg, deletePrefix)
 	if err != nil {
@@ -151,7 +158,7 @@ func run(cmd *cobra.Command, _ []string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			return pachanger.ProcessOtherFiles(fs, node, pkg.TypesInfo, path, absTargetFile, absOutputFile, newPkg, deletePrefix)
+			return pachanger.ProcessOtherFiles(fs, node, pkg.TypesInfo, path, absTargetFile, oldPkg, absOutputFile, newPkg, deletePrefix)
 		})
 		return nil
 	})
@@ -163,4 +170,5 @@ func run(cmd *cobra.Command, _ []string) {
 	if err := g.Wait(); err != nil {
 		slog.ErrorContext(ctx, "Error updating references", slog.Any("error", err))
 	}
+	slog.InfoContext(ctx, "Successfully updated references", slog.String("outputPath", absOutputFile))
 }
