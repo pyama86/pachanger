@@ -274,7 +274,7 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 	switch n := node.(type) {
 	case *ast.Ident:
 		// 親が SelectorExpr(ベースが oldPkg 以外) ならスキップ
-		if len(history) >= 2 && isSelectorExpr(history[len(history)-2], t.oldPkg) == false {
+		if len(history) >= 2 && !isSelectorExpr(history[len(history)-2], t.oldPkg) {
 			return t.updateIdentInTargetFile(n, typeInfo)
 		}
 	case *ast.StarExpr:
