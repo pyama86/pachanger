@@ -138,6 +138,7 @@ func run(cmd *cobra.Command, _ []string) {
 	// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
 	transformer := pachanger.NewTransformer(
 		fs,
+		absWorkDir,
 		absTargetFile,
 		absOutputFile,
 		oldPkg,
@@ -165,19 +166,19 @@ func run(cmd *cobra.Command, _ []string) {
 			return nil
 		}
 
-		nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
-		if errFilter != nil {
-			// パースできないファイルならスキップ（警告のみ）
-			slog.WarnContext(ctx, "Error filtering package", slog.Any("error", errFilter))
-			return nil
-		}
-		if nodeOther == nil || pkgOther == nil {
-			return nil
-		}
-
 		g.Go(func() error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+
+			nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
+			if errFilter != nil {
+				// パースできないファイルならスキップ（警告のみ）
+				slog.WarnContext(ctx, "Error filtering package", slog.Any("error", errFilter))
+				return nil
+			}
+			if nodeOther == nil || pkgOther == nil {
+				return nil
+			}
 
 			// 同じ Transformer インスタンスでOK。
 			// ただし、別ファイル用の *types.Info を渡す必要がある

@@ -1,15 +1,20 @@
 package pachanger
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/printer"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/imports"
 )
 
 // Transformer はシンボル変換に必要な情報を保持する構造体です。
@@ -20,12 +25,13 @@ type Transformer struct {
 	oldPkg       string
 	newPkg       string
 	deletePrefix string
+	workDir      string
 }
 
 // NewTransformer は Transformer 構造体を生成します。
 func NewTransformer(
 	fs *token.FileSet,
-	oldFile, absOutput, oldPkg, newPkg, deletePrefix string,
+	workDir, oldFile, absOutput, oldPkg, newPkg, deletePrefix string,
 ) *Transformer {
 	return &Transformer{
 		fs:           fs,
@@ -62,6 +68,53 @@ func FindPackageForFile(fs *token.FileSet, pkgs []*packages.Package, absTargetFi
 	return nil, nil, fmt.Errorf("target file %s not found in packages", absTargetFile)
 }
 
+// WriteFile は変更後の AST をフォーマットし、インポート整理しつつ指定パスへ書き出す。
+func (t *Transformer) writeFile(node *ast.File) error {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %v", err)
+	}
+	defer func() {
+		err := os.Chdir(originalDir)
+		if err != nil {
+			slog.Warn("failed to change directory to original", slog.Any("error", err))
+		}
+	}()
+
+	dir := filepath.Dir(t.workDir)
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("failed to change directory to %s: %v", dir, err)
+	}
+
+	var buf bytes.Buffer
+	config := &printer.Config{
+		Mode:     printer.UseSpaces,
+		Tabwidth: 4,
+	}
+	if err := config.Fprint(&buf, t.fs, node); err != nil {
+		return err
+	}
+
+	formatted, err := imports.Process(t.absOutput, buf.Bytes(), &imports.Options{
+		Comments:   true,
+		TabWidth:   4,
+		Fragment:   false,
+		FormatOnly: false,
+	})
+
+	if err != nil {
+		_ = os.WriteFile(t.absOutput, buf.Bytes(), 0644)
+
+		return fmt.Errorf("failed to format and manage imports: %v", err)
+	}
+
+	if err := os.WriteFile(t.absOutput, formatted, 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %v", t.absOutput, err)
+	}
+
+	return nil
+}
+
 // TransformSymbolsInTargetFile は、ターゲットファイル内のパッケージ名・シンボル名を変換します。
 // 変換があった場合、あるいは出力先ファイルが存在しない場合は新たにファイルを書き込みます。
 func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *types.Info) error {
@@ -73,7 +126,7 @@ func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *typ
 
 	// ファイルが存在しないか、modified == true の場合に書き出す
 	if _, err := os.Stat(t.absOutput); err != nil || modified {
-		if werr := WriteFile(t.absOutput, t.fs, node); werr != nil {
+		if werr := t.writeFile(node); werr != nil {
 			return werr
 		}
 	}
@@ -89,7 +142,7 @@ func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *type
 	}
 
 	if modified {
-		return WriteFile(filename, t.fs, node)
+		return t.writeFile(node)
 	}
 	return nil
 }
