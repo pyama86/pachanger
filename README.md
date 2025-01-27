@@ -39,6 +39,7 @@ Alternatively, you can clone the repository and build the binary manually:
 - `--output`  Directory to save the modified file (default: same directory as input file).
 - `--workdir` Working directory (default: current directory).
 - `--delete-prefix` Delete the prefix of the symbol name (default: "").
+- `--tags`    Build tags to consider when scanning files (default: "").
 
 ### Check Version
 

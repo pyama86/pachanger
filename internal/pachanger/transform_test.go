@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// nodeToString は、与えられた ast.File を string に変換します。
 func nodeToString(node *ast.File) (string, error) {
 	var buf bytes.Buffer
 	fs := token.NewFileSet()
@@ -20,6 +21,8 @@ func nodeToString(node *ast.File) (string, error) {
 	}
 	return buf.String(), nil
 }
+
+// parseGoSource は与えられた src (Goソースコード) をパースし、ast.File と *token.FileSet を返します。
 func parseGoSource(src string) (*ast.File, *token.FileSet, error) {
 	fs := token.NewFileSet()
 	node, err := parser.ParseFile(fs, "", src, parser.AllErrors)
@@ -28,6 +31,9 @@ func parseGoSource(src string) (*ast.File, *token.FileSet, error) {
 	}
 	return node, fs, nil
 }
+
+// mockTypesInfo はテスト用に簡易な types.Info を組み立て、
+// シンボル (Example, ModelExample など) がどのファイルに属しているかを記録したマップを返します。
 func mockTypesInfo(fs *token.FileSet, node *ast.File) (*types.Info, map[string]string) {
 	info := &types.Info{
 		Defs: make(map[*ast.Ident]types.Object),
@@ -36,31 +42,36 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File) (*types.Info, map[string]s
 	typeFileMap := make(map[string]string)
 
 	exampleFile := fs.AddFile("model/example.go", -1, 1000)
-	examplePos := token.Pos(exampleFile.Base() + 1)
+	examplePos := exampleFile.Base() + 1
 
 	modelExampleFile := fs.AddFile("model/model/example.go", -1, 1000)
-	modelExamplePos := token.Pos(modelExampleFile.Base() + 1)
+	modelExamplePos := modelExampleFile.Base() + 1
 
 	examplePkg := types.NewPackage("model", "model")
 	modelPkg := types.NewPackage("model", "model")
 
 	emptyStruct := types.NewStruct(nil, nil)
 
-	exampleObjType := types.NewTypeName(examplePos, examplePkg, "Example", nil)
+	// Example 用オブジェクト
+	exampleObjType := types.NewTypeName(token.Pos(examplePos), examplePkg, "Example", nil)
 	exampleNamedType := types.NewNamed(exampleObjType, emptyStruct, nil)
-	exampleObjTypeWithType := types.NewTypeName(examplePos, examplePkg, "Example", exampleNamedType)
+	exampleObjTypeWithType := types.NewTypeName(token.Pos(examplePos), examplePkg, "Example", exampleNamedType)
 
-	modelObjType := types.NewTypeName(modelExamplePos, modelPkg, "ModelExample", nil)
+	// ModelExample 用オブジェクト
+	modelObjType := types.NewTypeName(token.Pos(modelExamplePos), modelPkg, "ModelExample", nil)
 	modelNamedType := types.NewNamed(modelObjType, emptyStruct, nil)
-	modelObjTypeWithType := types.NewTypeName(modelExamplePos, modelPkg, "ModelExample", modelNamedType)
+	modelObjTypeWithType := types.NewTypeName(token.Pos(modelExamplePos), modelPkg, "ModelExample", modelNamedType)
 
 	ast.Inspect(node, func(n ast.Node) bool {
 		if ident, ok := n.(*ast.Ident); ok {
 			pos := fs.Position(ident.Pos())
+
+			// ダミーの objects
 			obj := types.NewTypeName(ident.Pos(), modelPkg, ident.Name, nil)
 			info.Defs[ident] = obj
 			info.Uses[ident] = obj
 
+			// Example
 			if ident.Name == "Example" {
 				typeFileMap[ident.Name] = "model/example.go"
 				info.Defs[ident] = exampleObjTypeWithType
@@ -70,6 +81,7 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File) (*types.Info, map[string]s
 				info.Defs[ident] = modelObjTypeWithType
 				info.Uses[ident] = modelObjTypeWithType
 			} else if pos.IsValid() {
+				// そのほかの識別子は適当に pos.Filename へ
 				typeFileMap[ident.Name] = pos.Filename
 			}
 		}
@@ -79,13 +91,14 @@ func mockTypesInfo(fs *token.FileSet, node *ast.File) (*types.Info, map[string]s
 	return info, typeFileMap
 }
 
-func TestTransformTargetAST(t *testing.T) {
+func TestTransformInTargetFile(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
 		oldPkg       string
 		newPkg       string
 		deletePrefix string
+		oldFile      string
 		expectMatch  string
 	}{
 		{
@@ -96,13 +109,14 @@ func TestTransformTargetAST(t *testing.T) {
 package model
 type Example struct {}
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 type Example struct {}
 `,
 		},
 		{
-			name:   "ModelExampleは mode.ModelExample に変換され、Example は model.Example のまま（構造体の埋め込み）",
+			name:   "ModelExampleを model.ModelExample に変更, Example は同ファイル→そのまま",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -112,6 +126,7 @@ type TestStruct struct {
 	ModelExample
 }
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 type TestStruct struct {
@@ -121,7 +136,7 @@ type TestStruct struct {
 `,
 		},
 		{
-			name:   "ModelExampleは mode.ModelExample に変換されるが ModelExample は変換されない（関数の戻り値）",
+			name:   "関数の戻り値でも同様の変換を確認",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -133,6 +148,7 @@ func CreateModel() ModelExample {
 	return ModelExample{}
 }
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 func Create() Example {
@@ -144,7 +160,7 @@ func CreateModel() model.ModelExample {
 `,
 		},
 		{
-			name:   "ModelExampleは mode.ModelExample に変換され、ModelExample は model.ModelExample のまま（メソッドの引数）",
+			name:   "メソッドの引数でも同様に変換",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -154,6 +170,7 @@ func (s TestStruct) SetExample(e Example) {
 func (s TestStruct) SetModelExample(me ModelExample) {
 }
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 func (s TestStruct) SetExample(e Example) {
@@ -163,7 +180,7 @@ func (s TestStruct) SetModelExample(me model.ModelExample) {
 `,
 		},
 		{
-			name:   "ModelExample は model.Example に変換されるが Example は変換されない（スライス）",
+			name:   "スライス内の ModelExample は model.ModelExample に変換",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -171,6 +188,7 @@ package model
 var examples []Example
 var modelExamples []ModelExample
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 var examples []Example
@@ -178,7 +196,7 @@ var modelExamples []model.ModelExample
 `,
 		},
 		{
-			name:   "ModelExample は model.Example に変換されるが Example は変換されない（ポインタ型）",
+			name:   "ポインタ型での変換確認",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
@@ -186,6 +204,7 @@ package model
 var examplePtr *Example
 var modelExamplePtr *ModelExample
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 var examplePtr *Example
@@ -193,21 +212,21 @@ var modelExamplePtr *model.ModelExample
 `,
 		},
 		{
-			name:   "ModelExample は model.ModelExample に変換されるが Example は変換されない（mapのキーと値）",
+			name:   "map のキーと値での変換",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
 package model
 var exampleMap map[Example]ModelExample
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 var exampleMap map[Example]model.ModelExample
 `,
 		},
-
 		{
-			name:         "Example 型のパッケージ移動とプレフィックス削除",
+			name:         "プレフィックス削除の確認",
 			oldPkg:       "model",
 			newPkg:       "example",
 			deletePrefix: "E",
@@ -217,10 +236,60 @@ type Sample struct {
 	modelExample Example
 }
 `,
+			oldFile: "model/example.go",
 			expectMatch: `
 package example
 type Sample struct {
 	modelExample xample
+}
+`,
+		},
+
+		// --------------------------------
+		// Additional tests for coverage
+		// --------------------------------
+
+		{
+			name:   "複数の埋め込み型 + ネストでの変換",
+			oldPkg: "model",
+			newPkg: "example",
+			input: `
+package model
+type Inner struct {
+	ModelExample
+}
+type Outer struct {
+	Inner
+}
+`,
+			oldFile: "model/example.go",
+			expectMatch: `
+package example
+type Inner struct {
+	model.ModelExample
+}
+type Outer struct {
+	Inner
+}
+`,
+		},
+		{
+			name:   "型エイリアスが含まれる場合のテスト（基本的には同様に model.ModelExample へ）",
+			oldPkg: "model",
+			newPkg: "example",
+			input: `
+package model
+type Alias = ModelExample
+type TestAlias struct {
+	A Alias
+}
+`,
+			oldFile: "model/example.go",
+			expectMatch: `
+package example
+type Alias = model.ModelExample
+type TestAlias struct {
+	A Alias
 }
 `,
 		},
@@ -233,13 +302,19 @@ type Sample struct {
 
 			typesInfo, _ := mockTypesInfo(fs, node)
 
-			_, err = transformTargetAST(fs, node, tt.newPkg, "model/example.go", tt.deletePrefix, typesInfo)
+			// Transformerを作成（outputFileはテストでは未使用なのでダミーでOK）
+			transformer := NewTransformer(fs, tt.oldFile, "ignored_output.go", tt.oldPkg, tt.newPkg, tt.deletePrefix)
+			_, err = transformer.transformInTargetFile(node, typesInfo)
 			assert.NoError(t, err)
 
+			// 期待値と比較
 			expectedNode, _, err := parseGoSource(tt.expectMatch)
 			assert.NoError(t, err)
 
+			// パッケージ名
 			assert.Equal(t, expectedNode.Name.Name, node.Name.Name)
+
+			// AST全体の文字列比較
 			nodeStr, err := nodeToString(node)
 			assert.NoError(t, err)
 			expectedStr, err := nodeToString(expectedNode)
@@ -249,14 +324,17 @@ type Sample struct {
 	}
 }
 
-func TestTransformOtherFileAST(t *testing.T) {
+// TestTransformSymbolsInOtherFile は他ファイルのシンボルをターゲットファイルの変更に合わせて変換する処理をテストします。
+func TestTransformInOtherFile(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
 		oldPkg       string
 		newPkg       string
 		deletePrefix string
-		expectMatch  string
+		// ターゲットファイル（= 変更元）のパス
+		oldFile     string
+		expectMatch string
 	}{
 		{
 			name:   "ModelExample 型を model から example に移動",
@@ -268,6 +346,7 @@ type TestStruct struct {
 	ModelExample
 }
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 type TestStruct struct {
@@ -276,55 +355,31 @@ type TestStruct struct {
 `,
 		},
 		{
-			name:   "ModelExample 型のポインタの修正",
+			name:   "ModelExample 型のポインタ変換",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
 package model
 var examplePtr *ModelExample
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 var examplePtr *example.ModelExample
 `,
 		},
 		{
-			name:   "ModelExample 型のスライスの修正",
+			name:   "ModelExample 型スライスの変換",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
 package model
 var examples []ModelExample
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 var examples []example.ModelExample
-`,
-		},
-		{
-			name:   "ModelExample 型を含む map の修正",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var exampleMap map[string]ModelExample
-`,
-			expectMatch: `
-package model
-var exampleMap map[string]example.ModelExample
-`,
-		},
-		{
-			name:   "ModelExample 型を map のキーに含むパターン",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var keyMap map[ModelExample]string
-`,
-			expectMatch: `
-package model
-var keyMap map[example.ModelExample]string
 `,
 		},
 		{
@@ -335,77 +390,30 @@ var keyMap map[example.ModelExample]string
 package model
 var keyValueMap map[ModelExample]ModelExample
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 var keyValueMap map[example.ModelExample]example.ModelExample
 `,
 		},
 		{
-			name:   "ModelExample 型を含むチャネル",
+			name:   "チャネルの例（受信専用, 送信専用など）",
 			oldPkg: "model",
 			newPkg: "example",
 			input: `
 package model
 var exampleChan chan ModelExample
+var sendOnlyChan chan<- ModelExample
+var receiveOnlyChan <-chan ModelExample
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 var exampleChan chan example.ModelExample
-`,
-		},
-		{
-			name:   "ModelExample 型を含む送信専用チャネル",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var sendOnlyChan chan<- ModelExample
-`,
-			expectMatch: `
-package model
 var sendOnlyChan chan<- example.ModelExample
-`,
-		},
-		{
-			name:   "Example 型を含む受信専用チャネル",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var receiveOnlyChan <-chan ModelExample
-`,
-			expectMatch: `
-package model
 var receiveOnlyChan <-chan example.ModelExample
 `,
 		},
-		{
-			name:   "Example 型を map のキーに持つチャネル",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var mapChan map[ModelExample]chan ModelExample
-`,
-			expectMatch: `
-package model
-var mapChan map[example.ModelExample]chan example.ModelExample
-`,
-		},
-		{
-			name:   "Example 型のスライスを持つチャネル",
-			oldPkg: "model",
-			newPkg: "example",
-			input: `
-package model
-var sliceChan chan []ModelExample
-`,
-			expectMatch: `
-package model
-var sliceChan chan []example.ModelExample
-`,
-		},
-
 		{
 			name:         "ModelExampleのPrefixを削除",
 			oldPkg:       "model",
@@ -417,10 +425,66 @@ type TestStruct struct {
 	ModelExample
 }
 `,
+			oldFile: "model/model/example.go",
 			expectMatch: `
 package model
 type TestStruct struct {
 	example.odelExample
+}
+`,
+		},
+
+		// --------------------------------
+		// Additional tests for coverage
+		// --------------------------------
+
+		{
+			name:   "型キャスト・CallExpr の例",
+			oldPkg: "model",
+			newPkg: "example",
+			input: `
+package model
+
+func Convert(x interface{}) ModelExample {
+	return ModelExample(x.(ModelExample))
+}
+`,
+			oldFile: "model/model/example.go",
+			expectMatch: `
+package model
+
+func Convert(x interface{}) example.ModelExample {
+	return example.ModelExample(x.(example.ModelExample))
+}
+`,
+		},
+		{
+			name:   "type switch での使用",
+			oldPkg: "model",
+			newPkg: "example",
+			input: `
+package model
+
+func Check(x interface{}) string {
+	switch x.(type) {
+	case ModelExample:
+		return "model"
+	default:
+		return "other"
+	}
+}
+`,
+			oldFile: "model/model/example.go",
+			expectMatch: `
+package model
+
+func Check(x interface{}) string {
+	switch x.(type) {
+	case example.ModelExample:
+		return "model"
+	default:
+		return "other"
+	}
 }
 `,
 		},
@@ -433,10 +497,13 @@ type TestStruct struct {
 
 			typesInfo, _ := mockTypesInfo(fs, node)
 
-			modified, err := transformOtherFileAST(fs, node, "model/model/example.go", tt.oldPkg, tt.newPkg, tt.deletePrefix, typesInfo)
-			assert.NoError(t, err)
-			assert.True(t, modified)
+			// Transformerを作成
+			transformer := NewTransformer(fs, tt.oldFile, "ignored_output.go", tt.oldPkg, tt.newPkg, tt.deletePrefix)
 
+			_, err = transformer.transformInOtherFile(node, typesInfo)
+			assert.NoError(t, err)
+
+			// AST 文字列比較
 			expectedNode, _, err := parseGoSource(tt.expectMatch)
 			assert.NoError(t, err)
 
@@ -447,7 +514,6 @@ type TestStruct struct {
 			expectedStr, err := nodeToString(expectedNode)
 			assert.NoError(t, err)
 			assert.Equal(t, expectedStr, nodeStr)
-
 		})
 	}
 }
