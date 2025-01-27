@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.4](https://github.com/pyama86/pachanger/compare/v0.0.3...v0.0.4) - 2025-01-27
+- i wanna delete prefix by @pyama86 in https://github.com/pyama86/pachanger/pull/12
+
 ## [v0.0.3](https://github.com/pyama86/pachanger/compare/v0.0.2...v0.0.3) - 2025-01-27
 - Release for v0.0.2 by @github-actions in https://github.com/pyama86/pachanger/pull/9
 
