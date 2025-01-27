@@ -92,9 +92,8 @@ func run(cmd *cobra.Command, _ []string) {
 		outputPath = path.Join(absWorkDir, outputPath)
 	}
 
-	// 出力パスがディレクトリの場合は、ターゲットファイル名で出力する
-	info, err := os.Stat(outputPath)
-	if err == nil && info.IsDir() {
+	ext := filepath.Ext(outputPath)
+	if ext == "" || ext == "." {
 		outputPath = path.Join(outputPath, filepath.Base(absTargetFile))
 	}
 
