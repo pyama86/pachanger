@@ -65,7 +65,12 @@ func (t *Transformer) writeFile(node *ast.File, output string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() {
+		err := os.Chdir(originalDir)
+		if err != nil {
+			fmt.Printf("failed to change directory to %s: %v\n", originalDir, err)
+		}
+	}()
 
 	dir := filepath.Dir(t.workDir)
 	if err := os.Chdir(dir); err != nil {
