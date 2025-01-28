@@ -86,7 +86,10 @@ func (t *Transformer) writeFile(node *ast.File, output string) error {
 	}
 
 	// SHOULD_BE_DELETED. が残っている場合は削除
-	buf = *bytes.NewBufferString(strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", ""))
+	tmp := strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", "")
+	// newPkgの繰り返しは削除
+	tmp = strings.ReplaceAll(tmp, t.newPkg+"."+t.newPkg+".", t.newPkg+".")
+	buf = *bytes.NewBufferString(tmp)
 	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
 		Comments: true, TabWidth: 4, Fragment: false, FormatOnly: false,
 	})
@@ -330,7 +333,7 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 			if n.Name == t.newPkg {
 				return false
 			}
-			return t.updateIdentInOtherFile(n, typeInfo)
+			return t.updateIdentInOtherFile(n, typeInfo, filePkg)
 		}
 	case *ast.GenDecl:
 		for _, spec := range n.Specs {
@@ -396,7 +399,7 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info
 	return false
 }
 
-func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info) bool {
+func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info, filePkg string) bool {
 	pkgName, pos := getPkgNameAndPositionForIdent(e, t.fs, typeInfo)
 
 	if pkgName == "" || pos.Filename == "" {
@@ -404,7 +407,11 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info)
 	}
 
 	if pkgName == t.oldPkg && pos.Filename == t.oldFile {
-		e.Name = strings.TrimPrefix(e.Name, t.deletePrefix)
+		if filePkg != t.newPkg {
+			e.Name = fmt.Sprintf("%s.%s", t.newPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+		} else {
+			e.Name = strings.TrimPrefix(e.Name, t.deletePrefix)
+		}
 		return true
 	}
 	return false

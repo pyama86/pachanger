@@ -49,6 +49,25 @@ func TestTransformOtherFile(t *testing.T) {
 	targetPath := "example/target_input.go"
 	targetPath = filepath.Join(workDir, targetPath)
 
+	t.Run("same package", func(t *testing.T) {
+		inputPath := "example/some_example.go"
+		expectedPath := "some_example_expected.go"
+		outputPath := "some_example_output.go"
+		defer os.Remove(outputPath)
+
+		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
+		assert.NoError(t, err)
+
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "changed_example", "")
+		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
+		assert.NoError(t, err)
+
+		diff, err := compareFiles(filepath.Join(workDir, outputPath), filepath.Join(workDir, expectedPath))
+		assert.NoError(t, err)
+		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+
+	})
+
 	t.Run("transform other file", func(t *testing.T) {
 		inputPath := "someother/otherfile_input.go"
 		expectedPath := "someother_otherfile_expected.go"
