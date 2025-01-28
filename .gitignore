@@ -25,3 +25,5 @@ go.work.sum
 .env
 
 bin/pachanger
+
+internal/pachanger/testdata/*_output.go
