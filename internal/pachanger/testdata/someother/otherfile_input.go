@@ -2,6 +2,8 @@ package someother
 
 import (
 	"fmt"
+
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
 )
 
 // exampleパッケージにある定数を参照（example.MyConst, example.MyConst2など）
@@ -12,11 +14,12 @@ const (
 
 // AnotherStruct は exampleパッケージの型を多数フィールドとして埋め込む例
 type AnotherStruct struct {
-	Count  int
-	Ex     example.Example                     // 構造体
-	Val    example.MyInt                       // 別名型
-	Box    example.GenericBox[example.Example] // ジェネリクス
-	Nested struct {
+	Count         int
+	Ex            example.Example                               // 構造体
+	Val           example.MyInt                                 // 別名型
+	Box           example.GenericBox[example.Example]           // ジェネリクス
+	WillChangeBox example.WillChangeGenericBox[example.Example] // ジェネリクス
+	Nested        struct {
 		Key   string
 		Value example.MyInt
 	}
@@ -46,7 +49,7 @@ func init() {
 // UseModelStuff は exampleパッケージの様々な要素を利用する関数
 func UseModelStuff() {
 	// example.NewExample でインスタンスを作る
-	ex := example.NewExample(100)
+	ex := example.NewExample(100, "")
 	fmt.Println("ex:", ex.GetInfo())
 
 	// さらに map, chanを使う例
@@ -81,4 +84,9 @@ func AnotherFunc(as *AnotherStruct) {
 	as.Ex.ID = 9999
 	as.Box.Value = 8888
 	fmt.Println("AnotherFunc updated as.Ex.ID and as.Box.Value")
+}
+
+// どこかに定義されている同じパッケージの別の型
+func retTime() example.NotDefined {
+	return example.NotDefined{}
 }

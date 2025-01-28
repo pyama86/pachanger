@@ -2,21 +2,24 @@ package someother
 
 import (
 	"fmt"
+
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
 )
 
 // exampleパッケージにある定数を参照（example.MyConst, example.MyConst2など）
 const (
-	LocalConstInt    = changed_example.MyConst
-	LocalConstString = changed_example.MyConst2
+	LocalConstInt    = example.MyConst
+	LocalConstString = example.MyConst2
 )
 
 // AnotherStruct は exampleパッケージの型を多数フィールドとして埋め込む例
 type AnotherStruct struct {
-	Count  int
-	Ex     changed_example.Example                             // 構造体
-	Val    changed_example.MyInt                               // 別名型
-	Box    changed_example.GenericBox[changed_example.Example] // ジェネリクス
-	Nested struct {
+	Count         int
+	Ex            changed_example.Example                                       // 構造体
+	Val           changed_example.MyInt                                         // 別名型
+	Box           example.GenericBox[changed_example.Example]                   // ジェネリクス
+	WillChangeBox changed_example.WillChangeGenericBox[changed_example.Example] // ジェネリクス
+	Nested        struct {
 		Key   string
 		Value changed_example.MyInt
 	}
@@ -39,14 +42,14 @@ var (
 
 // init関数で定数や関数を参照
 func init() {
-	fmt.Println("someother package init, referencing example:", changed_example.MyConst2)
+	fmt.Println("someother package init, referencing example:", example.MyConst2)
 	changed_example.PopulateSlice() // example側の関数呼び出し
 }
 
 // UseModelStuff は exampleパッケージの様々な要素を利用する関数
 func UseModelStuff() {
 	// example.NewExample でインスタンスを作る
-	ex := changed_example.NewExample(100)
+	ex := changed_example.NewExample(100, "")
 	fmt.Println("ex:", ex.GetInfo())
 
 	// さらに map, chanを使う例
@@ -57,7 +60,7 @@ func UseModelStuff() {
 	SomeChan <- ex
 
 	// ジェネリクス
-	box := changed_example.GenericBox[changed_example.MyInt]{Value: 321}
+	box := example.GenericBox[changed_example.MyInt]{Value: 321}
 	box.Print()
 
 	// type switchを使う関数を呼ぶ
@@ -81,4 +84,9 @@ func AnotherFunc(as *AnotherStruct) {
 	as.Ex.ID = 9999
 	as.Box.Value = 8888
 	fmt.Println("AnotherFunc updated as.Ex.ID and as.Box.Value")
+}
+
+// どこかに定義されている同じパッケージの別の型
+func retTime() example.NotDefined {
+	return example.NotDefined{}
 }

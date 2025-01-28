@@ -46,17 +46,17 @@ type Info interface {
 
 // Example が Info を実装
 func (e Example) GetInfo() string {
-	return fmt.Sprintf("Example(ID=%d, Note=%s)", e.ID, e.example.ExampleData.Note)
+	return fmt.Sprintf("Example(ID=%d, Note=%s)", e.ID, e.ExampleData.Note)
 }
 func (e Example) GetExample() example.SomeExample {
-	return e.example.ExampleData
+	return e.ExampleData
 }
 
 // コンストラクタ的関数
 func NewExample(id MyInt, note string) Example {
 	return Example{
 		ID: id,
-		example.ExampleData: example.SomeExample{
+		ExampleData: example.SomeExample{
 			ID:   id,
 			Note: note,
 		},
@@ -66,8 +66,8 @@ func NewExample(id MyInt, note string) Example {
 // ネストしたジェネリクスを使う
 func UseAnotherBox[T any](val T) {
 	a := example.AnotherGenericBox[T]{
-		Value:       val,
-		example.Box: example.GenericBox[T]{Value: val},
+		Value: val,
+		Box:   example.GenericBox[T]{Value: val},
 	}
 	a.Summarize()
 }
@@ -75,7 +75,7 @@ func UseAnotherBox[T any](val T) {
 func CheckType(x interface{}) {
 	switch v := x.(type) {
 	case Example:
-		fmt.Println("Example:", v.ID, v.example.ExampleData.Note)
+		fmt.Println("Example:", v.ID, v.ExampleData.Note)
 	case MyInt:
 		fmt.Println("MyInt:", v)
 	case example.SomeExample:
@@ -92,7 +92,7 @@ func DoEmbeddingTest() {
 	c.Name = "complex"
 	c.SubStruct.InnerID = 50
 	c.SubStruct.InnerData.ID = 888
-	c.SubStruct.example.ExampleData = example.SomeExample{ID: 101, Note: "SubStruct data"}
+	c.SubStruct.ExampleData = example.SomeExample{ID: 101, Note: "SubStruct data"}
 
 	info := c.GetInfo()
 	fmt.Println("DoEmbeddingTest info:", info)
@@ -101,8 +101,8 @@ func DoEmbeddingTest() {
 	g.ID = 77
 	g.Name = "great"
 	g.AliasValue = 123
-	g.example.SomeExample = example.SomeExample{ID: 777, Note: "Embedded example"}
-	fmt.Println("GreatStruct alias:", g.AliasValue, ", Embedded Note=", g.example.SomeExample.Note)
+	g.SomeExample = example.SomeExample{ID: 777, Note: "Embedded example"}
+	fmt.Println("GreatStruct alias:", g.AliasValue, ", Embedded Note=", g.SomeExample.Note)
 }
 
 // 追加: スライス操作
@@ -118,7 +118,7 @@ func SendToChan(ch chan<- MyInt, val MyInt) {
 // Closure で Example を使用
 func UseClosure(e Example) {
 	fn := func() {
-		fmt.Println("Closure: ID=", e.ID, ", Note=", e.example.ExampleData.Note)
+		fmt.Println("Closure: ID=", e.ID, ", Note=", e.ExampleData.Note)
 	}
 	fn()
 }
@@ -149,4 +149,13 @@ func PrintMyKind() {
 	if MyKind == example.KindFoo {
 		fmt.Println("MyKind is KindFoo")
 	}
+}
+
+// 既存ジェネリクス
+type WillChangeGenericBox[T any] struct {
+	Value T
+}
+
+func (g WillChangeGenericBox[T]) Print() {
+	fmt.Printf("WillChangeGenericBox: %+v\n", g.Value)
 }

@@ -124,9 +124,18 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 		file.Name.Name = t.newPkg
 	}
 	modified := false
-	var history []ast.Node
+	history := &([]ast.Node{})
 
 	ast.Inspect(file, func(n ast.Node) bool {
+		if n == nil {
+			if len(*history) > 0 {
+				*history = (*history)[:len(*history)-1]
+			}
+			return true
+		}
+
+		*history = append(*history, n)
+
 		switch node := n.(type) {
 		case *ast.Field:
 			if t.updateExpr(node.Type, typeInfo, history, isTarget) {
@@ -264,17 +273,7 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 // -----------------------------------------
 // updateExpr: isTarget に応じて関数を切替
 // -----------------------------------------
-func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, history []ast.Node, isTarget bool) bool {
-	if n == nil {
-		if n == nil {
-			if len(history) > 0 {
-				history = history[:len(history)-1]
-			}
-			return false
-		}
-		return false
-	}
-	history = append(history, n)
+func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, history *[]ast.Node, isTarget bool) bool {
 
 	if isTarget {
 		return t.updateExprInTargetFile(n, typeInfo, history)
@@ -282,12 +281,12 @@ func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, history []ast
 	return t.updateExprInOtherFile(n, typeInfo, history)
 }
 
-func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info, history []ast.Node) bool {
+func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info, history *[]ast.Node) bool {
 	switch n := node.(type) {
+	case *ast.Field:
+		return false
 	case *ast.Ident:
-		if len(history) < 2 || !isSelectorExpr(history[len(history)-2], t.oldPkg) {
-			return t.updateIdentInTargetFile(n, typeInfo)
-		}
+		return t.updateIdentInTargetFile(n, typeInfo)
 	case *ast.StarExpr:
 		return t.updateExprInTargetFile(n.X, typeInfo, history)
 	case *ast.ArrayType:
@@ -315,11 +314,14 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 	return false
 }
 
-func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info, history []ast.Node) bool {
+func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info, history *[]ast.Node) bool {
 	switch n := node.(type) {
 	case *ast.Ident:
-		if len(history) < 2 || !isSelectorExpr(history[len(history)-2], t.oldPkg) {
-			return t.updateIdentInOtherFile(n, typeInfo, true)
+		if len(*history) < 2 || !t.isSelectorExpr((*history)[len(*history)-2]) {
+			if n.Name == t.newPkg {
+				return false
+			}
+			return t.updateIdentInOtherFile(n, typeInfo)
 		}
 	case *ast.GenDecl:
 		for _, spec := range n.Specs {
@@ -331,7 +333,11 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		}
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if ident.Name == t.oldPkg {
+			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
+			if pkgName == "" || pos.Filename == "" {
+				return false
+			}
+			if ident.Name == t.oldPkg && pos.Filename == t.oldFile {
 				ident.Name = t.newPkg
 				return true
 			}
@@ -369,7 +375,6 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info
 	// ここで "pkgName == t.oldPkg" のみで判定し、
 	// pos.Filename == t.oldFile を削除すれば
 	// 同一パッケージ全体を変換できる。
-
 	if pkgName == t.oldPkg && pos.Filename != t.oldFile {
 		e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
 		return true
@@ -377,71 +382,52 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info
 	return false
 }
 
-func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info, isIdent bool) bool {
+func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info) bool {
 	pkgName, pos := getPkgNameAndPositionForIdent(e, t.fs, typeInfo)
 
-	if pkgName == "" {
+	if pkgName == "" || pos.Filename == "" {
 		return false
 	}
 
 	if pkgName == t.oldPkg && pos.Filename == t.oldFile {
-		if isIdent {
-			e.Name = fmt.Sprintf("%s.%s", t.newPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
-		} else {
-			e.Name = strings.TrimPrefix(e.Name, t.deletePrefix)
-		}
+		e.Name = strings.TrimPrefix(e.Name, t.deletePrefix)
 		return true
 	}
 	return false
 }
-
-func isSelectorExpr(n ast.Node, oldPkg string) bool {
-	sel, ok := n.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	return ident.Name != oldPkg
+func (t *Transformer) isSelectorExpr(n ast.Node) bool {
+	_, ok := n.(*ast.SelectorExpr)
+	return ok
 }
 
 func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *types.Info) (string, token.Position) {
 	if !isExported(e.Name) {
 		return "", token.Position{}
 	}
-	if obj, ok := typeInfo.Uses[e]; ok {
-		if constObj, isConst := obj.(*types.Const); isConst {
-			return extractPkgNameAndPos(fs, constObj)
-		}
-		if named, isNamed := obj.Type().(*types.Named); isNamed {
-			return extractPkgNameAndPos(fs, named.Obj())
-		}
-	}
-	if obj, ok := typeInfo.Defs[e]; ok {
-		if constObj, isConst := obj.(*types.Const); isConst {
-			return extractPkgNameAndPos(fs, constObj)
-		}
-		if named, isNamed := obj.Type().(*types.Named); isNamed {
-			return extractPkgNameAndPos(fs, named.Obj())
-		}
-	}
-	return "", token.Position{}
-}
 
-func extractPkgNameAndPos(fs *token.FileSet, obj types.Object) (string, token.Position) {
+	var obj types.Object
+	if o, ok := typeInfo.Uses[e]; ok {
+		obj = o
+	} else if o, ok := typeInfo.Defs[e]; ok {
+		obj = o
+	}
 	if obj == nil {
 		return "", token.Position{}
 	}
-	pos := fs.Position(obj.Pos())
-	if pos.Filename == "" {
-		return "", pos
+
+	pkg := obj.Pkg()
+	if pkg == nil {
+		return "", token.Position{}
 	}
-	if pkg := obj.Pkg(); pkg != nil {
-		return pkg.Name(), pos
+
+	// 「トップレベルに定義されている」かどうかを
+	// 「obj.Parent() がパッケージスコープ (pkg.Scope()) と同じかどうか」で判定
+	if obj.Parent() != pkg.Scope() {
+		// トップレベルのオブジェクトではない (例: struct フィールドやメソッドなど)
+		return "", token.Position{}
 	}
-	return "", pos
+
+	return pkg.Name(), fs.Position(obj.Pos())
 }
 
 func isExported(name string) bool {

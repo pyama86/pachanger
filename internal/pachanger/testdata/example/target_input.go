@@ -150,3 +150,12 @@ func PrintMyKind() {
 		fmt.Println("MyKind is KindFoo")
 	}
 }
+
+// 既存ジェネリクス
+type WillChangeGenericBox[T any] struct {
+	Value T
+}
+
+func (g WillChangeGenericBox[T]) Print() {
+	fmt.Printf("WillChangeGenericBox: %+v\n", g.Value)
+}
