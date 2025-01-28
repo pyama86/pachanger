@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"go/token"
@@ -17,7 +18,7 @@ import (
 )
 
 var (
-	targetFile   string
+	targetFiles  []string
 	newPkg       string
 	outputPath   string
 	workDir      string
@@ -33,7 +34,7 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		if targetFile == "" || newPkg == "" {
+		if len(targetFiles) == 0 || newPkg == "" {
 			if err := cmd.Help(); err != nil {
 				slog.Error("Failed to show help", slog.Any("error", err))
 			}
@@ -54,7 +55,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	rootCmd.Flags().StringVar(&targetFile, "file", "", "Target file to rename package (required)")
+	rootCmd.Flags().StringSliceVar(&targetFiles, "file", nil, "Target file(s) to rename package (required, or use '-')")
 	rootCmd.Flags().StringVar(&newPkg, "new", "", "New package name (required)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path (default: same directory as target file)")
 	rootCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory (default: current directory)")
@@ -62,6 +63,45 @@ func init() {
 	rootCmd.Flags().StringVar(&tagsFlag, "tags", "", "Build tags (e.g. 'test,integration')")
 
 	rootCmd.AddCommand(versionCmd)
+}
+
+// determineOutputFile は、outputPath が空や相対パスの場合に正しい絶対パスを返し、
+// ディレクトリが存在しない場合は作成します。
+func determineOutputFile(
+	ctx context.Context,
+	absWorkDir string,
+	absTargetFile string,
+	outputPath string,
+) (string, error) {
+
+	// もし --output が指定されていない場合、ターゲットファイルと同じ場所 + 同名にする
+	if outputPath == "" {
+		outputPath = path.Join(filepath.Dir(absTargetFile), filepath.Base(absTargetFile))
+	}
+
+	// outputPath が相対パスなら、workDir を起点とした絶対パスにする
+	if !filepath.IsAbs(outputPath) {
+		outputPath = path.Join(absWorkDir, outputPath)
+	}
+
+	// 拡張子がない、または "." のみの場合は、ターゲットファイル名を付加する
+	ext := filepath.Ext(outputPath)
+	if ext == "" || ext == "." {
+		outputPath = path.Join(outputPath, filepath.Base(absTargetFile))
+	}
+
+	// 最終的な絶対パス
+	absOutputFile, err := filepath.Abs(outputPath)
+	if err != nil {
+		return "", err
+	}
+
+	// 出力先ディレクトリがない場合は作成
+	if err := os.MkdirAll(filepath.Dir(absOutputFile), 0o755); err != nil {
+		return "", err
+	}
+
+	return absOutputFile, nil
 }
 
 func run(cmd *cobra.Command, _ []string) {
@@ -86,129 +126,142 @@ func run(cmd *cobra.Command, _ []string) {
 	}
 
 	// ターゲットファイルの絶対パス
-	absTargetFile := targetFile
-	if !filepath.IsAbs(targetFile) {
-		absTargetFile = path.Join(absWorkDir, targetFile)
-	}
-
-	// 出力ファイルの絶対パス
-	if outputPath == "" {
-		outputPath = path.Join(filepath.Dir(absTargetFile), filepath.Base(absTargetFile))
-	}
-	if !filepath.IsAbs(outputPath) {
-		outputPath = path.Join(absWorkDir, outputPath)
-	}
-
-	ext := filepath.Ext(outputPath)
-	if ext == "" || ext == "." {
-		outputPath = path.Join(outputPath, filepath.Base(absTargetFile))
-	}
-
-	absOutputFile, err := filepath.Abs(outputPath)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to determine absolute output path",
-			slog.String("outputPath", outputPath), slog.Any("error", err))
+	// targetFiles が空ならエラー
+	if len(targetFiles) == 0 {
+		slog.Error("No files specified via --file")
 		return
 	}
 
-	// 出力先ディレクトリを作成しておく
-	if err := os.MkdirAll(filepath.Dir(absOutputFile), 0755); err != nil {
-		slog.ErrorContext(ctx, "Failed to create output directory",
-			slog.String("dir", filepath.Dir(absOutputFile)), slog.Any("error", err))
-		return
-	}
+	// 「-」が含まれていたら標準入力からファイルパスを読み込む
+	var expanded []string
+	for _, f := range targetFiles {
+		if f == "-" {
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				if !filepath.IsAbs(line) {
+					line = path.Join(absWorkDir, line)
+				}
+				expanded = append(expanded, line)
 
-	// ターゲットファイルと出力ファイルが異なる場合、既存の出力ファイルを削除
-	if absTargetFile != absOutputFile {
-		if err := os.Remove(absOutputFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-			slog.ErrorContext(ctx, "Failed to remove existing file",
-				slog.String("file", absOutputFile), slog.Any("error", err))
-			return
+			}
+			if err := scanner.Err(); err != nil {
+				slog.Error("failed to read from stdin", slog.Any("error", err))
+				os.Exit(1)
+			}
+		} else {
+			if !filepath.IsAbs(f) {
+				f = path.Join(absWorkDir, f)
+			}
+			expanded = append(expanded, f)
 		}
 	}
-
 	fs := token.NewFileSet()
+	slog.InfoContext(ctx, "Loading packages", slog.String("workDir", absWorkDir))
 	allPkgs, err := pachanger.LoadPackages(fs, absWorkDir, buildFlags)
 	if err != nil {
 		slog.ErrorContext(ctx, "Error loading packages", slog.Any("error", err))
 		return
 	}
+	slog.InfoContext(ctx, "Loaded packages", slog.String("workDir", absWorkDir))
 
-	node, pkg, err := pachanger.FindPackageForFile(fs, allPkgs, absTargetFile)
-	if err != nil {
-		slog.ErrorContext(ctx, "Error finding target file in packages", slog.Any("error", err))
-		return
-	}
-	oldPkg := pkg.Name
-
-	// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
-	transformer := pachanger.NewTransformer(
-		fs,
-		absWorkDir,
-		absTargetFile,
-		oldPkg,
-		newPkg,
-		deletePrefix,
-	)
-
-	if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {
-		slog.ErrorContext(ctx, "Error transforming target file",
-			slog.String("file", absTargetFile), slog.Any("error", err))
-		return
-	}
-
-	// 他ファイルを並列で変換
-	g, ctx := errgroup.WithContext(ctx)
-	sem := make(chan struct{}, runtime.NumCPU()/2)
-
-	err = filepath.WalkDir(absWorkDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	for _, absTargetFile := range expanded {
+		slog.InfoContext(ctx, "Processing target file", slog.String("file", absTargetFile))
+		absOutputFile, err := determineOutputFile(ctx, absWorkDir, absTargetFile, outputPath)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to determine output file",
+				slog.String("outputPath", outputPath), slog.Any("error", err))
+			return
 		}
 
-		// .go ファイルで、かつターゲット/出力ファイル以外が対象
-		if !strings.HasSuffix(path, ".go") || path == absTargetFile || path == absOutputFile {
-			return nil
+		// ターゲットファイルと出力ファイルが異なる場合、既存の出力ファイルを削除
+		if absTargetFile != absOutputFile {
+			if err := os.Remove(absOutputFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+				slog.ErrorContext(ctx, "Failed to remove existing file",
+					slog.String("file", absOutputFile), slog.Any("error", err))
+				return
+			}
 		}
 
-		g.Go(func() error {
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		node, pkg, err := pachanger.FindPackageForFile(fs, allPkgs, absTargetFile)
+		if err != nil {
+			slog.ErrorContext(ctx, "Error finding target file in packages", slog.Any("error", err))
+			return
+		}
+		oldPkg := pkg.Name
 
-			nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
-			if errFilter != nil {
-				// パースできないファイルならスキップ（警告のみ）
-				slog.WarnContext(ctx, "Error filtering package", slog.Any("error", errFilter))
-				return nil
-			}
-			if nodeOther == nil || pkgOther == nil {
-				return nil
-			}
+		// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
+		transformer := pachanger.NewTransformer(
+			fs,
+			absWorkDir,
+			absTargetFile,
+			oldPkg,
+			newPkg,
+			deletePrefix,
+		)
 
-			// 同じ Transformer インスタンスでOK。
-			// ただし、別ファイル用の *types.Info を渡す必要がある
-			return transformer.TransformSymbolsInOtherFile(nodeOther, pkgOther.TypesInfo, path)
-		})
-		return nil
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "Error walking directory", slog.Any("error", err))
-		return
-	}
-
-	if err := g.Wait(); err != nil {
-		slog.ErrorContext(ctx, "Error updating references", slog.Any("error", err))
-		return
-	}
-
-	// ターゲットファイルを削除
-	if absTargetFile != absOutputFile {
-		if err := os.Remove(absTargetFile); err != nil {
-			slog.ErrorContext(ctx, "Failed to remove target file",
+		if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {
+			slog.ErrorContext(ctx, "Error transforming target file",
 				slog.String("file", absTargetFile), slog.Any("error", err))
 			return
 		}
-	}
 
-	slog.InfoContext(ctx, "Successfully updated references", slog.String("outputPath", absOutputFile))
+		// 他ファイルを並列で変換
+		g, ctx := errgroup.WithContext(ctx)
+		sem := make(chan struct{}, runtime.NumCPU()/2)
+
+		err = filepath.WalkDir(absWorkDir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+
+			// .go ファイルで、かつターゲット/出力ファイル以外が対象
+			if !strings.HasSuffix(path, ".go") || path == absTargetFile || path == absOutputFile {
+				return nil
+			}
+
+			g.Go(func() error {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
+				if errFilter != nil {
+					// パースできないファイルならスキップ（警告のみ）
+					slog.WarnContext(ctx, "Error filtering package", slog.Any("error", errFilter))
+					return nil
+				}
+				if nodeOther == nil || pkgOther == nil {
+					return nil
+				}
+
+				// 同じ Transformer インスタンスでOK。
+				// ただし、別ファイル用の *types.Info を渡す必要がある
+				return transformer.TransformSymbolsInOtherFile(nodeOther, pkgOther.TypesInfo, path)
+			})
+			return nil
+		})
+		if err != nil {
+			slog.ErrorContext(ctx, "Error walking directory", slog.Any("error", err))
+			return
+		}
+
+		if err := g.Wait(); err != nil {
+			slog.ErrorContext(ctx, "Error updating references", slog.Any("error", err))
+			return
+		}
+
+		// ターゲットファイルを削除
+		if absTargetFile != absOutputFile {
+			if err := os.Remove(absTargetFile); err != nil {
+				slog.ErrorContext(ctx, "Failed to remove target file",
+					slog.String("file", absTargetFile), slog.Any("error", err))
+				return
+			}
+		}
+		slog.InfoContext(ctx, "Successfully updated file", slog.String("file", absOutputFile))
+	}
+	slog.InfoContext(ctx, "Successfully updated references", slog.String("newPkg", newPkg))
 }
