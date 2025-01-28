@@ -34,7 +34,7 @@ Alternatively, you can clone the repository and build the binary manually:
 
 ### Options
 
-- `--file`    The target file where the package name should be changed (required).
+- `--file`    The target file to change the package name (required).
 - `--new`     The new package name (required).
 - `--output`  Directory to save the modified file (default: same directory as input file).
 - `--workdir` Working directory (default: current directory).
@@ -43,7 +43,7 @@ Alternatively, you can clone the repository and build the binary manually:
 
 ### Check Version
 
-```
+```sh
 % pachanger version
 ```
 
@@ -53,7 +53,7 @@ Alternatively, you can clone the repository and build the binary manually:
 
 Rename the package in `model/example.go` to `example` and save the modified file in `out/`:
 
-```
+```sh
 % pachanger --file model/example.go --new example --output model/example
 ```
 
@@ -61,8 +61,14 @@ Rename the package in `model/example.go` to `example` and save the modified file
 
 Set `src` as the working directory and rename the package in `model/example.go` to `example`:
 
-```
+```sh
 % pachanger --file model/example.go --new example --workdir src
+```
+
+### Using Standard Input
+
+```sh
+% cat file.list | pachanger --new example --file -
 ```
 
 ## How It Works
