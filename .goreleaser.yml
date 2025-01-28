@@ -15,8 +15,8 @@ brews:
       owner: pyama86
       name: homebrew-ptools
     commit_author:
-      name: goreleaserbot
-      email: goreleaser@carlosbecker.com
+      name: pyama86
+      email: www.kazu.com@gmail.com
     description: "pachanger is a tool to change the package name of Go source code."
     homepage: "https://github.com/pyama86/pachanger"
     install: |
