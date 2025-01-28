@@ -43,28 +43,49 @@ func TestTransformOtherFile(t *testing.T) {
 	assert.NoError(t, err)
 	workDir = filepath.Join(workDir, "testdata")
 
-	inputPath := "someother/otherfile_input.go"
-	targetPath := "example/target_input.go"
-	expectedPath := "otherfile_expected.go"
-	outputPath := "otherfile_output.go"
-	defer os.Remove(outputPath)
-
 	fs := token.NewFileSet()
 	pkgs, err := pachanger.LoadPackages(fs, workDir, nil)
 	assert.NoError(t, err)
-
-	node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
-	assert.NoError(t, err)
-
+	targetPath := "example/target_input.go"
 	targetPath = filepath.Join(workDir, targetPath)
 
-	transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "changed_example", "")
-	err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
-	assert.NoError(t, err)
+	t.Run("transform other file", func(t *testing.T) {
+		inputPath := "someother/otherfile_input.go"
+		expectedPath := "someother_otherfile_expected.go"
+		outputPath := "someother_otherfile_output.go"
+		defer os.Remove(outputPath)
 
-	diff, err := compareFiles(filepath.Join(workDir, outputPath), filepath.Join(workDir, expectedPath))
-	assert.NoError(t, err)
-	assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
+		assert.NoError(t, err)
+
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "changed_example", "")
+		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
+		assert.NoError(t, err)
+
+		diff, err := compareFiles(filepath.Join(workDir, outputPath), filepath.Join(workDir, expectedPath))
+		assert.NoError(t, err)
+		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+	})
+
+	// パッケージ名が削除されるパターン
+	t.Run("transform other file with delete package name", func(t *testing.T) {
+
+		inputPath := "changed_example/otherfile_input.go"
+		expectedPath := "changed_example_otherfile_expected.go"
+		outputPath := "changed_example_otherfile_output.go"
+		defer os.Remove(outputPath)
+
+		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
+		assert.NoError(t, err)
+
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "changed_example", "")
+		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
+		assert.NoError(t, err)
+
+		diff, err := compareFiles(filepath.Join(workDir, outputPath), filepath.Join(workDir, expectedPath))
+		assert.NoError(t, err)
+		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+	})
 }
 
 func compareFiles(fileA, fileB string) (string, error) {

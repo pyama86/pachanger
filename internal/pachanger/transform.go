@@ -16,6 +16,8 @@ import (
 	"golang.org/x/tools/imports"
 )
 
+const SHOULD_BE_DELETED = "SHOULD_BE_DELETED"
+
 type Transformer struct {
 	fs           *token.FileSet
 	oldFile      string
@@ -83,6 +85,8 @@ func (t *Transformer) writeFile(node *ast.File, output string) error {
 		return err
 	}
 
+	// SHOULD_BE_DELETED. が残っている場合は削除
+	buf = *bytes.NewBufferString(strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", ""))
 	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
 		Comments: true, TabWidth: 4, Fragment: false, FormatOnly: false,
 	})
@@ -130,6 +134,7 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 	}
 	modified := false
 	history := &([]ast.Node{})
+	filePkg := file.Name.Name
 
 	ast.Inspect(file, func(n ast.Node) bool {
 		if n == nil {
@@ -143,20 +148,20 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 
 		switch node := n.(type) {
 		case *ast.Field:
-			if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 		case *ast.ValueSpec:
-			if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 			for _, val := range node.Values {
-				if t.updateExpr(val, typeInfo, history, isTarget) {
+				if t.updateExpr(val, typeInfo, history, filePkg, isTarget) {
 					modified = true
 				}
 			}
 			for _, name := range node.Names {
-				if t.updateExpr(name, typeInfo, history, isTarget) {
+				if t.updateExpr(name, typeInfo, history, filePkg, isTarget) {
 					modified = true
 				}
 			}
@@ -164,14 +169,14 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 		case *ast.FuncDecl:
 			if node.Type.Params != nil {
 				for _, p := range node.Type.Params.List {
-					if t.updateExpr(p.Type, typeInfo, history, isTarget) {
+					if t.updateExpr(p.Type, typeInfo, history, filePkg, isTarget) {
 						modified = true
 					}
 				}
 			}
 			if node.Type.Results != nil {
 				for _, r := range node.Type.Results.List {
-					if t.updateExpr(r.Type, typeInfo, history, isTarget) {
+					if t.updateExpr(r.Type, typeInfo, history, filePkg, isTarget) {
 						modified = true
 					}
 				}
@@ -179,7 +184,7 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 			if node.Body != nil {
 				ast.Inspect(node.Body, func(bodyNode ast.Node) bool {
 					if ex, ok := bodyNode.(ast.Expr); ok {
-						if t.updateExpr(ex, typeInfo, history, isTarget) {
+						if t.updateExpr(ex, typeInfo, history, filePkg, isTarget) {
 							modified = true
 						}
 					}
@@ -188,21 +193,21 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 			}
 
 		case *ast.TypeSpec:
-			if t.updateExpr(node.Name, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Name, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 			if node.Assign != token.NoPos {
-				if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+				if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 					modified = true
 				}
 			} else {
-				if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+				if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 					modified = true
 				}
 			}
 
 		case *ast.TypeAssertExpr:
-			if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 
@@ -210,7 +215,7 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 			for _, stmt := range node.Body.List {
 				if cc, ok := stmt.(*ast.CaseClause); ok {
 					for i, expr := range cc.List {
-						if t.updateExpr(expr, typeInfo, history, isTarget) {
+						if t.updateExpr(expr, typeInfo, history, filePkg, isTarget) {
 							modified = true
 							cc.List[i] = expr
 						}
@@ -220,49 +225,49 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 
 		case *ast.CaseClause:
 			for i, expr := range node.List {
-				if t.updateExpr(expr, typeInfo, history, isTarget) {
+				if t.updateExpr(expr, typeInfo, history, filePkg, isTarget) {
 					modified = true
 					node.List[i] = expr
 				}
 			}
 
 		case *ast.CallExpr:
-			if t.updateExpr(node.Fun, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Fun, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 			for i, arg := range node.Args {
-				if t.updateExpr(arg, typeInfo, history, isTarget) {
+				if t.updateExpr(arg, typeInfo, history, filePkg, isTarget) {
 					modified = true
 					node.Args[i] = arg
 				}
 			}
 
 		case *ast.CompositeLit:
-			if t.updateExpr(node.Type, typeInfo, history, isTarget) {
+			if t.updateExpr(node.Type, typeInfo, history, filePkg, isTarget) {
 				modified = true
 			}
 			for _, elt := range node.Elts {
 				if kv, ok := elt.(*ast.KeyValueExpr); ok {
-					if t.updateExpr(kv.Value, typeInfo, history, isTarget) {
+					if t.updateExpr(kv.Value, typeInfo, history, filePkg, isTarget) {
 						modified = true
 					}
 				} else {
-					if t.updateExpr(elt, typeInfo, history, isTarget) {
+					if t.updateExpr(elt, typeInfo, history, filePkg, isTarget) {
 						modified = true
 					}
 				}
 			}
 		case *ast.IndexExpr: // 単一のジェネリック型
-			mod := t.updateExpr(node.X, typeInfo, history, isTarget)
-			if t.updateExpr(node.Index, typeInfo, history, isTarget) {
+			mod := t.updateExpr(node.X, typeInfo, history, filePkg, isTarget)
+			if t.updateExpr(node.Index, typeInfo, history, filePkg, isTarget) {
 				mod = true
 			}
 			return mod
 
 		case *ast.IndexListExpr: // 複数のジェネリック型
-			mod := t.updateExpr(node.X, typeInfo, history, isTarget)
+			mod := t.updateExpr(node.X, typeInfo, history, filePkg, isTarget)
 			for _, idx := range node.Indices {
-				if t.updateExpr(idx, typeInfo, history, isTarget) {
+				if t.updateExpr(idx, typeInfo, history, filePkg, isTarget) {
 					mod = true
 				}
 			}
@@ -278,12 +283,11 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 // -----------------------------------------
 // updateExpr: isTarget に応じて関数を切替
 // -----------------------------------------
-func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, history *[]ast.Node, isTarget bool) bool {
-
+func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, history *[]ast.Node, filePkg string, isTarget bool) bool {
 	if isTarget {
 		return t.updateExprInTargetFile(n, typeInfo, history)
 	}
-	return t.updateExprInOtherFile(n, typeInfo, history)
+	return t.updateExprInOtherFile(n, typeInfo, filePkg, history)
 }
 
 func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info, history *[]ast.Node) bool {
@@ -319,7 +323,7 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 	return false
 }
 
-func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info, history *[]ast.Node) bool {
+func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info, filePkg string, history *[]ast.Node) bool {
 	switch n := node.(type) {
 	case *ast.Ident:
 		if len(*history) < 2 || !t.isSelectorExpr((*history)[len(*history)-2]) {
@@ -331,7 +335,7 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 	case *ast.GenDecl:
 		for _, spec := range n.Specs {
 			if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-				if t.updateExprInOtherFile(typeSpec.Type, typeInfo, history) {
+				if t.updateExprInOtherFile(typeSpec.Type, typeInfo, filePkg, history) {
 					return true
 				}
 			}
@@ -343,27 +347,32 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 				return false
 			}
 			if ident.Name == t.oldPkg && pos.Filename == t.oldFile {
+				// パッケージ名が変更された場合、パッケージ名の補完が不要になることがある
+				if t.newPkg == filePkg {
+					ident.Name = SHOULD_BE_DELETED
+					return true
+				}
 				ident.Name = t.newPkg
 				return true
 			}
 		}
 	case *ast.StarExpr:
-		return t.updateExprInOtherFile(n.X, typeInfo, history)
+		return t.updateExprInOtherFile(n.X, typeInfo, filePkg, history)
 	case *ast.ArrayType:
-		mod := t.updateExprInOtherFile(n.Elt, typeInfo, history)
+		mod := t.updateExprInOtherFile(n.Elt, typeInfo, filePkg, history)
 		return mod
 	case *ast.MapType:
-		mod := t.updateExprInOtherFile(n.Key, typeInfo, history)
-		if t.updateExprInOtherFile(n.Value, typeInfo, history) {
+		mod := t.updateExprInOtherFile(n.Key, typeInfo, filePkg, history)
+		if t.updateExprInOtherFile(n.Value, typeInfo, filePkg, history) {
 			mod = true
 		}
 		return mod
 	case *ast.ChanType:
-		return t.updateExprInOtherFile(n.Value, typeInfo, history)
+		return t.updateExprInOtherFile(n.Value, typeInfo, filePkg, history)
 	case *ast.CallExpr:
-		mod := t.updateExprInOtherFile(n.Fun, typeInfo, history)
+		mod := t.updateExprInOtherFile(n.Fun, typeInfo, filePkg, history)
 		for _, arg := range n.Args {
-			if t.updateExprInOtherFile(arg, typeInfo, history) {
+			if t.updateExprInOtherFile(arg, typeInfo, filePkg, history) {
 				mod = true
 			}
 		}
