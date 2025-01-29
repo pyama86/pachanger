@@ -35,8 +35,8 @@ type ComplexStruct struct {
 
 type GreatStruct struct {
 	ComplexStruct
-	AliasValue          Alias
-	example.SomeExample // 埋め込み (from some_example.go)
+	AliasValue  Alias
+	SomeExample // 埋め込み (from some_example.go)
 }
 
 type Info interface {

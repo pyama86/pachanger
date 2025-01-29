@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"go/token"
 	"log/slog"
 	"os"
@@ -24,6 +25,7 @@ var (
 	workDir      string
 	deletePrefix string
 	tagsFlag     string
+	debug        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -42,7 +44,10 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		run(cmd, args)
+		if err := run(); err != nil {
+			slog.Error("Failed to run command", slog.Any("error", err))
+			os.Exit(1)
+		}
 	},
 }
 
@@ -61,14 +66,13 @@ func init() {
 	rootCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory (default: current directory)")
 	rootCmd.Flags().StringVar(&deletePrefix, "delete-prefix", "", "Delete prefix from symbol name")
 	rootCmd.Flags().StringVar(&tagsFlag, "tags", "", "Build tags (e.g. 'test,integration')")
-
+	rootCmd.Flags().BoolVar(&debug, "debug", false, "debug mode")
 	rootCmd.AddCommand(versionCmd)
 }
 
 // determineOutputFile は、outputPath が空や相対パスの場合に正しい絶対パスを返し、
 // ディレクトリが存在しない場合は作成します。
 func determineOutputFile(
-	ctx context.Context,
 	absWorkDir string,
 	absTargetFile string,
 	outputPath string,
@@ -104,21 +108,32 @@ func determineOutputFile(
 	return absOutputFile, nil
 }
 
-func run(cmd *cobra.Command, _ []string) {
+func run() error {
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+
+	}
+
+	slog.SetDefault(
+		slog.New(
+			slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{Level: level},
+			),
+		),
+	)
+
 	ctx := context.Background()
 	buildFlags := []string{}
 	absWorkDir, err := filepath.Abs(workDir)
 	if err != nil {
-		slog.ErrorContext(ctx, "Failed to determine absolute workdir path",
-			slog.String("workDir", workDir), slog.Any("error", err))
-		return
+		return fmt.Errorf("failed to get absolute path of workdir: %w", err)
 	}
 
 	// workDirにgo.modが存在するか確認
 	if _, err := os.Stat(filepath.Join(absWorkDir, "go.mod")); err != nil {
-		slog.ErrorContext(ctx, "go.mod not found in workdir",
-			slog.String("workDir", absWorkDir), slog.Any("error", err))
-		return
+		return fmt.Errorf("go.mod not found in workdir: %w", err)
 	}
 
 	if tagsFlag != "" {
@@ -128,8 +143,7 @@ func run(cmd *cobra.Command, _ []string) {
 	// ターゲットファイルの絶対パス
 	// targetFiles が空ならエラー
 	if len(targetFiles) == 0 {
-		slog.Error("No files specified via --file")
-		return
+		return fmt.Errorf("target file(s) not set")
 	}
 
 	// 「-」が含まれていたら標準入力からファイルパスを読み込む
@@ -149,8 +163,7 @@ func run(cmd *cobra.Command, _ []string) {
 
 			}
 			if err := scanner.Err(); err != nil {
-				slog.Error("failed to read from stdin", slog.Any("error", err))
-				os.Exit(1)
+				return fmt.Errorf("failed to read from stdin: %w", err)
 			}
 		} else {
 			if !filepath.IsAbs(f) {
@@ -163,35 +176,61 @@ func run(cmd *cobra.Command, _ []string) {
 	slog.InfoContext(ctx, "Loading packages", slog.String("workDir", absWorkDir))
 	allPkgs, err := pachanger.LoadPackages(fs, absWorkDir, buildFlags)
 	if err != nil {
-		slog.ErrorContext(ctx, "Error loading packages", slog.Any("error", err))
-		return
+		return fmt.Errorf("failed to load packages: %w", err)
 	}
+
 	slog.InfoContext(ctx, "Loaded packages", slog.String("workDir", absWorkDir))
 
 	for _, absTargetFile := range expanded {
 		slog.InfoContext(ctx, "Processing target file", slog.String("file", absTargetFile))
-		absOutputFile, err := determineOutputFile(ctx, absWorkDir, absTargetFile, outputPath)
+		absOutputFile, err := determineOutputFile(absWorkDir, absTargetFile, outputPath)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to determine output file",
-				slog.String("outputPath", outputPath), slog.Any("error", err))
-			return
+			return fmt.Errorf("failed to determine output file: %w", err)
 		}
 
 		// ターゲットファイルと出力ファイルが異なる場合、既存の出力ファイルを削除
 		if absTargetFile != absOutputFile {
 			if err := os.Remove(absOutputFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-				slog.ErrorContext(ctx, "Failed to remove existing file",
-					slog.String("file", absOutputFile), slog.Any("error", err))
-				return
+				return fmt.Errorf("failed to remove output file: %w", err)
 			}
 		}
 
 		node, pkg, err := pachanger.FindPackageForFile(fs, allPkgs, absTargetFile)
 		if err != nil {
-			slog.ErrorContext(ctx, "Error finding target file in packages", slog.Any("error", err))
-			return
+			return fmt.Errorf("failed to find package for file: %w", err)
 		}
 		oldPkg := pkg.Name
+		oldPkgPath := pkg.PkgPath
+
+		if os.Getenv("PACHANGER_PKG_DEBUG") != "" {
+			for _, pkg := range allPkgs {
+				if pkg.Name != oldPkg && pkg.Name != newPkg {
+					continue
+				}
+				fmt.Printf("Loaded Package: %s\n", pkg.PkgPath)
+				if pkg.Types != nil {
+					fmt.Printf("  Package Name: %s\n", pkg.Types.Name())
+				}
+
+				fmt.Println("  --- Defs ---")
+				for id, obj := range pkg.TypesInfo.Defs {
+					if obj != nil {
+						fmt.Printf("  Def: %s (%s)\n", id.Name, obj.Type().String())
+					} else {
+						fmt.Printf("  Def: %s (invalid type)\n", id.Name)
+					}
+				}
+
+				fmt.Println("  --- Uses ---")
+				for id, obj := range pkg.TypesInfo.Uses {
+					if obj != nil {
+						fmt.Printf("  Use: %s (%s)\n", id.Name, obj.Type().String())
+					} else {
+						fmt.Printf("  Use: %s (invalid type)\n", id.Name)
+					}
+				}
+			}
+		}
 
 		// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
 		transformer := pachanger.NewTransformer(
@@ -199,14 +238,13 @@ func run(cmd *cobra.Command, _ []string) {
 			absWorkDir,
 			absTargetFile,
 			oldPkg,
+			oldPkgPath,
 			newPkg,
 			deletePrefix,
 		)
 
 		if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {
-			slog.ErrorContext(ctx, "Error transforming target file",
-				slog.String("file", absTargetFile), slog.Any("error", err))
-			return
+			return fmt.Errorf("failed to transform symbols in target file: %w", err)
 		}
 
 		// 他ファイルを並列で変換
@@ -217,12 +255,18 @@ func run(cmd *cobra.Command, _ []string) {
 			if walkErr != nil {
 				return walkErr
 			}
+			if os.Getenv("PACHANGER_FILTER_FILE") != "" {
+				if !strings.Contains(path, os.Getenv("PACHANGER_FILTER_FILE")) {
+					return nil
+				}
+			}
 
 			// .go ファイルで、かつターゲット/出力ファイル以外が対象
 			if !strings.HasSuffix(path, ".go") || path == absTargetFile || path == absOutputFile {
 				return nil
 			}
 
+			slog.DebugContext(ctx, "Processing other file", slog.String("file", path))
 			g.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
@@ -230,7 +274,7 @@ func run(cmd *cobra.Command, _ []string) {
 				nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
 				if errFilter != nil {
 					// パースできないファイルならスキップ（警告のみ）
-					slog.WarnContext(ctx, "Error filtering package", slog.Any("error", errFilter))
+					slog.WarnContext(ctx, "Error finding package for file", slog.String("file", path), slog.Any("error", errFilter))
 					return nil
 				}
 				if nodeOther == nil || pkgOther == nil {
@@ -244,24 +288,21 @@ func run(cmd *cobra.Command, _ []string) {
 			return nil
 		})
 		if err != nil {
-			slog.ErrorContext(ctx, "Error walking directory", slog.Any("error", err))
-			return
+			return fmt.Errorf("failed to walk directory: %w", err)
 		}
 
 		if err := g.Wait(); err != nil {
-			slog.ErrorContext(ctx, "Error updating references", slog.Any("error", err))
-			return
+			return fmt.Errorf("failed to transform symbols in other files: %w", err)
 		}
 
 		// ターゲットファイルを削除
 		if absTargetFile != absOutputFile {
 			if err := os.Remove(absTargetFile); err != nil {
-				slog.ErrorContext(ctx, "Failed to remove target file",
-					slog.String("file", absTargetFile), slog.Any("error", err))
-				return
+				return fmt.Errorf("failed to remove target file: %w", err)
 			}
 		}
 		slog.InfoContext(ctx, "Successfully updated file", slog.String("file", absOutputFile))
 	}
 	slog.InfoContext(ctx, "Successfully updated references", slog.String("newPkg", newPkg))
+	return nil
 }

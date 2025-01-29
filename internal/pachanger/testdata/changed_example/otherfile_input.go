@@ -10,6 +10,7 @@ type ChangedExample struct {
 		InnerData   example.Example
 		ExampleData SomeExample // 参照
 	}
+	example.Example
 }
 
 // コンストラクタ的関数
@@ -21,4 +22,8 @@ func NewChangedExample(id MyInt, note string) example.Example {
 			Note: note,
 		},
 	}
+}
+
+func SomeFunc() {
+	a := example.Example{}
 }

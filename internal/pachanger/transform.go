@@ -7,11 +7,13 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
 
+	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
 )
@@ -22,6 +24,8 @@ type Transformer struct {
 	fs           *token.FileSet
 	oldFile      string
 	oldPkg       string
+	oldPkgPath   string
+	newPkgPath   string
 	newPkg       string
 	deletePrefix string
 	workDir      string
@@ -29,11 +33,19 @@ type Transformer struct {
 }
 
 // NewTransformer は Transformer を生成
-func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, newPkg, deletePrefix string) *Transformer {
+func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, deletePrefix string) *Transformer {
+	newPkgPath := ""
+	pos := strings.LastIndex(oldPkgPath, oldPkg)
+	if pos > 0 {
+		newPkgPath = oldPkgPath[:pos] + newPkg
+	}
+
 	return &Transformer{
 		fs:           fs,
 		oldFile:      oldFile,
 		oldPkg:       oldPkg,
+		oldPkgPath:   oldPkgPath,
+		newPkgPath:   newPkgPath,
 		newPkg:       newPkg,
 		deletePrefix: deletePrefix,
 		workDir:      workDir,
@@ -42,8 +54,9 @@ func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, newPkg, deleteP
 }
 
 func LoadPackages(fs *token.FileSet, absWorkDir string, buildFlags []string) ([]*packages.Package, error) {
+	slog.Debug("LoadPackages", slog.String("workDir", absWorkDir), slog.String("buildFlags", strings.Join(buildFlags, " ")))
 	cfg := &packages.Config{
-		Mode:       packages.LoadAllSyntax,
+		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
 		Dir:        absWorkDir,
 		Fset:       fs,
 		Tests:      true,
@@ -90,9 +103,11 @@ func (t *Transformer) writeFile(node *ast.File, output string) error {
 	// SHOULD_BE_DELETED. が残っている場合は削除
 	tmp := strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", "")
 	buf = *bytes.NewBufferString(tmp)
+
 	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
-		Comments: true, TabWidth: 4, Fragment: false, FormatOnly: false,
+		Comments: true, TabWidth: 8, Fragment: true, FormatOnly: false, AllErrors: true,
 	})
+
 	if err != nil {
 		_ = os.WriteFile(output, buf.Bytes(), 0644)
 		return fmt.Errorf("failed to format/imports: %v", err)
@@ -111,6 +126,10 @@ func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, typeInfo *typ
 		return err
 	}
 	if _, err := os.Stat(output); err != nil || modified {
+		// import pathを追加
+		if t.oldPkgPath != "" && !astutil.UsesImport(node, t.oldPkgPath) {
+			astutil.AddImport(t.fs, node, t.oldPkgPath)
+		}
 		return t.writeFile(node, output)
 	}
 	return nil
@@ -123,6 +142,11 @@ func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *type
 		return err
 	}
 	if modified {
+		// import pathを追加
+		if t.newPkgPath != "" && !astutil.UsesImport(node, t.newPkgPath) {
+			astutil.AddImport(t.fs, node, t.newPkgPath)
+		}
+
 		return t.writeFile(node, output)
 	}
 	return nil
@@ -289,6 +313,24 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 		return false
 	case *ast.Ident:
 		return t.updateIdentInTargetFile(n, typeInfo)
+	case *ast.SelectorExpr:
+		if ident, ok := n.X.(*ast.Ident); ok {
+			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
+			if pkgName == "" || pos.Filename == "" {
+				slog.Debug(fmt.Sprintf("Pos NotFound SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg))
+				return false
+			}
+
+			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg))
+			if ident.Name == t.newPkg && pos.Filename == t.oldFile {
+				// 探索したファイル内のパッケージが既に新しいパッケージで、
+				// 今回変更する対象のファイルのAPIをコールしている場合、
+				// パッケージ名を削除する必要がある
+				ident.Name = SHOULD_BE_DELETED
+				return true
+			}
+		}
+
 	case *ast.StarExpr:
 		return t.updateExprInTargetFile(n.X, typeInfo)
 	case *ast.ArrayType:
@@ -339,10 +381,16 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		if ident, ok := n.X.(*ast.Ident); ok {
 			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
 			if pkgName == "" || pos.Filename == "" {
+				slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
 				return false
 			}
+
+			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
 			if ident.Name == t.oldPkg && pos.Filename == t.oldFile {
-				// パッケージ名が変更された場合、パッケージ名の補完が不要になることがある
+
+				// 探索したファイル内のパッケージが既に新しいパッケージで、
+				// 今回変更する対象のファイルのAPIをコールしている場合、
+				// パッケージ名を削除する必要がある
 				if t.newPkg == filePkg {
 					ident.Name = SHOULD_BE_DELETED
 					return true
@@ -416,11 +464,12 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 	}
 
 	var obj types.Object
-	if o, ok := typeInfo.Uses[e]; ok {
+	if o, ok := typeInfo.Defs[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" {
 		obj = o
-	} else if o, ok := typeInfo.Defs[e]; ok {
+	} else if o, ok := typeInfo.Uses[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" {
 		obj = o
 	}
+
 	if obj == nil {
 		return "", token.Position{}
 	}
@@ -430,7 +479,6 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 		return "", token.Position{}
 	}
 
-	// 「トップレベルに定義されている」かどうかを
 	// 「obj.Parent() がパッケージスコープ (pkg.Scope()) と同じかどうか」で判定
 	if obj.Parent() != pkg.Scope() {
 		// トップレベルのオブジェクトではない (例: struct フィールドやメソッドなど)
