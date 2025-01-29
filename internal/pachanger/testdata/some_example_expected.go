@@ -20,6 +20,7 @@ type SomeExample struct {
 	ID      changed_example.MyInt
 	Note    string
 	example changed_example.Example
+	changed_example.Example
 }
 
 // iotaで列挙的定数

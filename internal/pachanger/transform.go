@@ -27,13 +27,14 @@ type Transformer struct {
 	oldPkgPath   string
 	newPkgPath   string
 	newPkg       string
+	addPrefix    string
 	deletePrefix string
 	workDir      string
 	doneIdent    map[*ast.Ident]bool
 }
 
 // NewTransformer は Transformer を生成
-func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, deletePrefix string) *Transformer {
+func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, addPrefix, deletePrefix string) *Transformer {
 	newPkgPath := ""
 	pos := strings.LastIndex(oldPkgPath, oldPkg)
 	if pos > 0 {
@@ -47,6 +48,7 @@ func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, new
 		oldPkgPath:   oldPkgPath,
 		newPkgPath:   newPkgPath,
 		newPkg:       newPkg,
+		addPrefix:    addPrefix,
 		deletePrefix: deletePrefix,
 		workDir:      workDir,
 		doneIdent:    map[*ast.Ident]bool{},
@@ -433,7 +435,7 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info
 	// pos.Filename == t.oldFile を削除すれば
 	// 同一パッケージ全体を変換できる。
 	if pkgName == t.oldPkg && pos.Filename != t.oldFile {
-		e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+		e.Name = fmt.Sprintf("%s.%s%s", t.oldPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 		return true
 	}
 	return false
@@ -448,9 +450,9 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info,
 
 	if pkgName == t.oldPkg && pos.Filename == t.oldFile {
 		if filePkg != t.newPkg {
-			e.Name = fmt.Sprintf("%s.%s", t.newPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 		} else {
-			e.Name = strings.TrimPrefix(e.Name, t.deletePrefix)
+			e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 		}
 		return true
 	}
@@ -473,9 +475,16 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 		return "", token.Position{}
 	}
 
+	// **埋め込みフィールドの処理**
+	if v, ok := obj.(*types.Var); ok && v.Embedded() {
+		// `Var.Type()` から `Named` 型を取得（埋め込みフィールドの型情報）
+		if named, ok := v.Type().(*types.Named); ok {
+			obj = named.Obj() // 埋め込み構造体の定義オブジェクトに置き換え
+		}
+	}
+
 	// 「obj.Parent() がパッケージスコープ (pkg.Scope()) と同じかどうか」で判定
 	if obj.Parent() != obj.Pkg().Scope() {
-		// トップレベルのオブジェクトではない (例: struct フィールドやメソッドなど)
 		return "", token.Position{}
 	}
 

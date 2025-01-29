@@ -24,6 +24,7 @@ var (
 	outputPath   string
 	workDir      string
 	deletePrefix string
+	addPrefix    string
 	tagsFlag     string
 	debug        bool
 )
@@ -65,6 +66,7 @@ func init() {
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path (default: same directory as target file)")
 	rootCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory (default: current directory)")
 	rootCmd.Flags().StringVar(&deletePrefix, "delete-prefix", "", "Delete prefix from symbol name")
+	rootCmd.Flags().StringVar(&addPrefix, "add-prefix", "", "Add prefix to symbol name")
 	rootCmd.Flags().StringVar(&tagsFlag, "tags", "", "Build tags (e.g. 'test,integration')")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "debug mode")
 	rootCmd.AddCommand(versionCmd)
@@ -240,6 +242,7 @@ func run() error {
 			oldPkg,
 			oldPkgPath,
 			newPkg,
+			addPrefix,
 			deletePrefix,
 		)
 

@@ -38,6 +38,7 @@ Alternatively, you can clone the repository and build the binary manually:
 - `--new`     The new package name (required).
 - `--output`  Directory to save the modified file (default: same directory as input file).
 - `--workdir` Working directory (default: current directory).
+- `--add-prefix` Add the prefix to the symbol name (default: "").
 - `--delete-prefix` Delete the prefix of the symbol name (default: "").
 - `--tags`    Build tags to consider when scanning files (default: "").
 

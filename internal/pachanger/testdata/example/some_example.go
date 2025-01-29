@@ -20,6 +20,7 @@ type SomeExample struct {
 	ID      MyInt
 	Note    string
 	example Example
+	Example
 }
 
 // iotaで列挙的定数

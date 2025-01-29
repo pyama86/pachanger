@@ -1,16 +1,12 @@
 package changed_example
 
-import (
-	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
-)
-
 type ChangedExample struct {
 	example   Example
 	SubStruct struct {
 		InnerData   Example
 		ExampleData SomeExample // 参照
 	}
-	example.Example
+	Example
 }
 
 // コンストラクタ的関数
