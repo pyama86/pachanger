@@ -321,11 +321,13 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 		return t.updateIdentInTargetFile(n, typeInfo)
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if (ident.Name == t.oldPkg || ident.Name == t.newPkg) && t.targetSymbols[n.Sel.Name] {
-				// 探索したファイル内のパッケージが既に新しいパッケージで、
-				// 今回変更する対象のファイルのAPIをコールしている場合、
+			if ident.Name == t.newPkg {
+				// 対象のファイルで、新しいパッケージを参照している場合
 				// パッケージ名を削除する必要がある
 				ident.Name = SHOULD_BE_DELETED
+				t.mu.Lock()
+				defer t.mu.Unlock()
+				t.doneIdent[n.Sel] = true
 				return true
 			} else if ident.Name != t.oldPkg && ident.Name != t.newPkg {
 				t.mu.Lock()
@@ -384,10 +386,8 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		}
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if (ident.Name == t.oldPkg || ident.Name == t.newPkg) && t.targetSymbols[n.Sel.Name] {
-				// 探索したファイル内のパッケージが既に新しいパッケージで、
-				// 今回変更する対象のファイルのAPIをコールしている場合、
-				// パッケージ名を削除する必要がある
+			// 変更前のパッケージ名でアクセスしている
+			if t.targetSymbols[n.Sel.Name] && ident.Name == t.oldPkg {
 				if t.newPkg == filePkg {
 					ident.Name = SHOULD_BE_DELETED
 					return true
