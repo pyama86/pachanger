@@ -89,7 +89,6 @@ func TestTransformOtherFile(t *testing.T) {
 
 		targetSymbols := filterDefSymbols(fs, pkg, targetPath)
 
-		fmt.Printf("targetSymbols: %v\n", targetSymbols)
 		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "", targetSymbols)
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
