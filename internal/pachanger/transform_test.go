@@ -3,6 +3,7 @@ package pachanger_test
 import (
 	"fmt"
 	"go/token"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,23 @@ import (
 	"github.com/pyama86/pachanger/internal/pachanger"
 	"github.com/stretchr/testify/assert"
 )
+
+func init() {
+	level := slog.LevelInfo
+	if os.Getenv("PACHANGER_DEBUG") != "" {
+		level = slog.LevelDebug
+
+	}
+
+	slog.SetDefault(
+		slog.New(
+			slog.NewTextHandler(
+				os.Stdout,
+				&slog.HandlerOptions{Level: level},
+			),
+		),
+	)
+}
 
 func TestTransformTargetFile(t *testing.T) {
 	workDir, err := os.Getwd()
@@ -29,7 +47,7 @@ func TestTransformTargetFile(t *testing.T) {
 	node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 	assert.NoError(t, err)
 
-	transformer := pachanger.NewTransformer(fs, workDir, filepath.Join(workDir, inputPath), "example", "", "changed_example", "")
+	transformer := pachanger.NewTransformer(fs, workDir, filepath.Join(workDir, inputPath), "example", "", "changed_example", "", "")
 	err = transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 	assert.NoError(t, err)
 
@@ -58,7 +76,7 @@ func TestTransformOtherFile(t *testing.T) {
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "")
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 
@@ -77,7 +95,7 @@ func TestTransformOtherFile(t *testing.T) {
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "")
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 
@@ -97,7 +115,7 @@ func TestTransformOtherFile(t *testing.T) {
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "")
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 

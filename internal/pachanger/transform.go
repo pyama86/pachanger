@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/tools/go/ast/astutil"
@@ -31,6 +32,7 @@ type Transformer struct {
 	deletePrefix string
 	workDir      string
 	doneIdent    map[*ast.Ident]bool
+	mu           sync.Mutex
 }
 
 // NewTransformer は Transformer を生成
@@ -323,13 +325,17 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 				return false
 			}
 
-			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg))
+			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("newPkg", t.newPkg), slog.String("oldFile", t.oldFile), slog.String("pos", pos.Filename))
 			if ident.Name == t.newPkg && pos.Filename == t.oldFile {
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
 				ident.Name = SHOULD_BE_DELETED
 				return true
+			} else if ident.Name != t.oldPkg && ident.Name != t.newPkg {
+				t.mu.Lock()
+				defer t.mu.Unlock()
+				t.doneIdent[n.Sel] = true
 			}
 		}
 
@@ -367,6 +373,8 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 			return false
 		}
 
+		t.mu.Lock()
+		defer t.mu.Unlock()
 		if t.doneIdent[n] {
 			return false
 		}
@@ -397,8 +405,15 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 					return true
 				}
 				ident.Name = t.newPkg
+				t.mu.Lock()
+				defer t.mu.Unlock()
 				t.doneIdent[n.Sel] = true
 				return true
+				// 無関係なパッケージは置き換えない
+			} else if ident.Name != t.oldPkg && ident.Name != t.newPkg {
+				t.mu.Lock()
+				defer t.mu.Unlock()
+				t.doneIdent[n.Sel] = true
 			}
 		}
 	case *ast.StarExpr:
@@ -434,7 +449,10 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info
 	// ここで "pkgName == t.oldPkg" のみで判定し、
 	// pos.Filename == t.oldFile を削除すれば
 	// 同一パッケージ全体を変換できる。
-	if pkgName == t.oldPkg && pos.Filename != t.oldFile {
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if pkgName == t.oldPkg && pos.Filename != t.oldFile && !t.doneIdent[e] {
 		e.Name = fmt.Sprintf("%s.%s%s", t.oldPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 		return true
 	}
@@ -475,11 +493,9 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 		return "", token.Position{}
 	}
 
-	// **埋め込みフィールドの処理**
 	if v, ok := obj.(*types.Var); ok && v.Embedded() {
-		// `Var.Type()` から `Named` 型を取得（埋め込みフィールドの型情報）
 		if named, ok := v.Type().(*types.Named); ok {
-			obj = named.Obj() // 埋め込み構造体の定義オブジェクトに置き換え
+			obj = named.Obj()
 		}
 	}
 
