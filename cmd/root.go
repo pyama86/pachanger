@@ -203,6 +203,13 @@ func run() error {
 		}
 		oldPkg := pkg.Name
 		oldPkgPath := pkg.PkgPath
+		targetSymbols := map[string]bool{}
+		// pkgの中からエクスポートされているシンボルを抽出
+		for _, d := range pkg.TypesInfo.Defs {
+			if d != nil && d.Exported() && fs.Position(d.Pos()).Filename == absTargetFile && d.Parent() == d.Pkg().Scope() {
+				targetSymbols[d.Name()] = true
+			}
+		}
 
 		if os.Getenv("PACHANGER_PKG_DEBUG") != "" {
 			for _, pkg := range allPkgs {
@@ -244,6 +251,7 @@ func run() error {
 			newPkg,
 			addPrefix,
 			deletePrefix,
+			targetSymbols,
 		)
 
 		if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/pyama86/pachanger/internal/pachanger"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/tools/go/packages"
 )
 
 func init() {
@@ -28,6 +29,15 @@ func init() {
 			),
 		),
 	)
+}
+func filterDefSymbols(fs *token.FileSet, pkg *packages.Package, absTargetFile string) map[string]bool {
+	targetSymbols := make(map[string]bool)
+	for _, d := range pkg.TypesInfo.Defs {
+		if d != nil && d.Exported() && fs.Position(d.Pos()).Filename == absTargetFile && d.Parent() == d.Pkg().Scope() {
+			targetSymbols[d.Name()] = true
+		}
+	}
+	return targetSymbols
 }
 
 func TestTransformTargetFile(t *testing.T) {
@@ -47,7 +57,8 @@ func TestTransformTargetFile(t *testing.T) {
 	node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 	assert.NoError(t, err)
 
-	transformer := pachanger.NewTransformer(fs, workDir, filepath.Join(workDir, inputPath), "example", "", "changed_example", "", "")
+	targetSymbols := filterDefSymbols(fs, pkg, filepath.Join(workDir, inputPath))
+	transformer := pachanger.NewTransformer(fs, workDir, filepath.Join(workDir, inputPath), "example", "", "changed_example", "", "", targetSymbols)
 	err = transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 	assert.NoError(t, err)
 
@@ -76,7 +87,10 @@ func TestTransformOtherFile(t *testing.T) {
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
+		targetSymbols := filterDefSymbols(fs, pkg, targetPath)
+
+		fmt.Printf("targetSymbols: %v\n", targetSymbols)
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "", targetSymbols)
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 
@@ -92,10 +106,14 @@ func TestTransformOtherFile(t *testing.T) {
 		outputPath := "someother_otherfile_output.go"
 		defer os.Remove(outputPath)
 
+		_, pkg, err := pachanger.FindPackageForFile(fs, pkgs, targetPath)
+		assert.NoError(t, err)
+		targetSymbols := filterDefSymbols(fs, pkg, targetPath)
+
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "", targetSymbols)
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 
@@ -112,10 +130,14 @@ func TestTransformOtherFile(t *testing.T) {
 		outputPath := "changed_example_otherfile_output.go"
 		defer os.Remove(outputPath)
 
+		_, pkg, err := pachanger.FindPackageForFile(fs, pkgs, targetPath)
+		assert.NoError(t, err)
+		targetSymbols := filterDefSymbols(fs, pkg, targetPath)
+
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
 
-		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "")
+		transformer := pachanger.NewTransformer(fs, workDir, targetPath, "example", "", "changed_example", "", "", targetSymbols)
 		err = transformer.TransformSymbolsInOtherFile(node, pkg.TypesInfo, filepath.Join(workDir, outputPath))
 		assert.NoError(t, err)
 

@@ -19,8 +19,8 @@ func (a AnotherGenericBox[T]) Summarize() {
 type SomeExample struct {
 	ID      MyInt
 	Note    string
-	example Example
-	Example
+	example OtherExample
+	OtherExample
 }
 
 // iotaで列挙的定数

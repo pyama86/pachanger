@@ -23,6 +23,10 @@ type Example struct {
 	exampleMap   map[string][]example.SomeExample
 }
 
+type OtherExample struct {
+	ID MyInt
+}
+
 type ComplexStruct struct {
 	Example
 	Name      string

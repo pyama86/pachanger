@@ -22,21 +22,22 @@ import (
 const SHOULD_BE_DELETED = "SHOULD_BE_DELETED"
 
 type Transformer struct {
-	fs           *token.FileSet
-	oldFile      string
-	oldPkg       string
-	oldPkgPath   string
-	newPkgPath   string
-	newPkg       string
-	addPrefix    string
-	deletePrefix string
-	workDir      string
-	doneIdent    map[*ast.Ident]bool
-	mu           sync.Mutex
+	fs            *token.FileSet
+	oldFile       string
+	oldPkg        string
+	oldPkgPath    string
+	newPkgPath    string
+	newPkg        string
+	addPrefix     string
+	deletePrefix  string
+	workDir       string
+	doneIdent     map[*ast.Ident]bool
+	targetSymbols map[string]bool
+	mu            sync.Mutex
 }
 
 // NewTransformer は Transformer を生成
-func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, addPrefix, deletePrefix string) *Transformer {
+func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, addPrefix, deletePrefix string, targetSymbols map[string]bool) *Transformer {
 	newPkgPath := ""
 	pos := strings.LastIndex(oldPkgPath, oldPkg)
 	if pos > 0 {
@@ -44,16 +45,17 @@ func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, new
 	}
 
 	return &Transformer{
-		fs:           fs,
-		oldFile:      oldFile,
-		oldPkg:       oldPkg,
-		oldPkgPath:   oldPkgPath,
-		newPkgPath:   newPkgPath,
-		newPkg:       newPkg,
-		addPrefix:    addPrefix,
-		deletePrefix: deletePrefix,
-		workDir:      workDir,
-		doneIdent:    map[*ast.Ident]bool{},
+		fs:            fs,
+		oldFile:       oldFile,
+		oldPkg:        oldPkg,
+		oldPkgPath:    oldPkgPath,
+		newPkgPath:    newPkgPath,
+		newPkg:        newPkg,
+		addPrefix:     addPrefix,
+		deletePrefix:  deletePrefix,
+		workDir:       workDir,
+		doneIdent:     map[*ast.Ident]bool{},
+		targetSymbols: targetSymbols,
 	}
 }
 
@@ -319,14 +321,12 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 		return t.updateIdentInTargetFile(n, typeInfo)
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
-			if pkgName == "" || pos.Filename == "" {
-				slog.Debug(fmt.Sprintf("Pos NotFound SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg))
+			pkgName := getPkgNameForIdent(n.Sel, t.fs, typeInfo)
+			if pkgName == "" {
 				return false
 			}
 
-			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Target", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("newPkg", t.newPkg), slog.String("oldFile", t.oldFile), slog.String("pos", pos.Filename))
-			if ident.Name == t.newPkg && pos.Filename == t.oldFile {
+			if ident.Name == t.newPkg && t.targetSymbols[n.Sel.Name] {
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
@@ -389,14 +389,12 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		}
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
-			if pkgName == "" || pos.Filename == "" {
-				slog.Debug(fmt.Sprintf("Pos Notfound SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
+			pkgName := getPkgNameForIdent(n.Sel, t.fs, typeInfo)
+			if pkgName == "" {
 				return false
 			}
 
-			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
-			if ident.Name == t.oldPkg && pos.Filename == t.oldFile {
+			if ident.Name == t.oldPkg && t.targetSymbols[n.Sel.Name] {
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
@@ -445,28 +443,29 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 // Ident の置き換えロジック
 // ----------------------------------------
 func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info) bool {
-	pkgName, pos := getPkgNameAndPositionForIdent(e, t.fs, typeInfo)
-	// ここで "pkgName == t.oldPkg" のみで判定し、
-	// pos.Filename == t.oldFile を削除すれば
-	// 同一パッケージ全体を変換できる。
-
+	pkgName := getPkgNameForIdent(e, t.fs, typeInfo)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if pkgName == t.oldPkg && pos.Filename != t.oldFile && !t.doneIdent[e] {
-		e.Name = fmt.Sprintf("%s.%s%s", t.oldPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+	if pkgName == "" {
+		return false
+	}
+	// 同じパッケージで対象のファイルのシンボルではない場合
+	if pkgName == t.oldPkg && !t.targetSymbols[e.Name] && !t.doneIdent[e] {
+		e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
 		return true
+	} else if pkgName == t.oldPkg && t.targetSymbols[e.Name] {
+		e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 	}
 	return false
 }
 
 func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info, filePkg string) bool {
-	pkgName, pos := getPkgNameAndPositionForIdent(e, t.fs, typeInfo)
-
-	if pkgName == "" || pos.Filename == "" {
+	pkgName := getPkgNameForIdent(e, t.fs, typeInfo)
+	if pkgName == "" {
 		return false
 	}
 
-	if pkgName == t.oldPkg && pos.Filename == t.oldFile {
+	if pkgName == t.oldPkg && t.targetSymbols[e.Name] {
 		if filePkg != t.newPkg {
 			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 		} else {
@@ -477,9 +476,9 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info,
 	return false
 }
 
-func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *types.Info) (string, token.Position) {
+func getPkgNameForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *types.Info) string {
 	if !isExported(e.Name) {
-		return "", token.Position{}
+		return ""
 	}
 
 	var obj types.Object
@@ -490,7 +489,7 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 	}
 
 	if obj == nil {
-		return "", token.Position{}
+		return ""
 	}
 
 	if v, ok := obj.(*types.Var); ok && v.Embedded() {
@@ -499,12 +498,11 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 		}
 	}
 
-	// 「obj.Parent() がパッケージスコープ (pkg.Scope()) と同じかどうか」で判定
 	if obj.Parent() != obj.Pkg().Scope() {
-		return "", token.Position{}
+		return ""
 	}
 
-	return obj.Pkg().Name(), fs.Position(obj.Pos())
+	return obj.Pkg().Name()
 }
 
 func isExported(name string) bool {
