@@ -381,13 +381,12 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		if ident, ok := n.X.(*ast.Ident); ok {
 			pkgName, pos := getPkgNameAndPositionForIdent(n.Sel, t.fs, typeInfo)
 			if pkgName == "" || pos.Filename == "" {
-				slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
+				slog.Debug(fmt.Sprintf("Pos Notfound SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
 				return false
 			}
 
 			slog.Debug(fmt.Sprintf("SelectorExpr %s.%s for Other", ident.Name, n.Sel.Name), slog.String("oldPkg", t.oldPkg), slog.String("oldFile", t.oldFile), slog.String("newPkg", t.newPkg), slog.String("filePkg", filePkg))
 			if ident.Name == t.oldPkg && pos.Filename == t.oldFile {
-
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
@@ -464,9 +463,9 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 	}
 
 	var obj types.Object
-	if o, ok := typeInfo.Defs[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" {
+	if o, ok := typeInfo.Defs[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" && fs.Position(o.Pos()).Filename != "" {
 		obj = o
-	} else if o, ok := typeInfo.Uses[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" {
+	} else if o, ok := typeInfo.Uses[e]; ok && o != nil && o.Pkg() != nil && o.Pkg().Name() != "" && fs.Position(o.Pos()).Filename != "" {
 		obj = o
 	}
 
@@ -474,18 +473,13 @@ func getPkgNameAndPositionForIdent(e *ast.Ident, fs *token.FileSet, typeInfo *ty
 		return "", token.Position{}
 	}
 
-	pkg := obj.Pkg()
-	if pkg == nil {
-		return "", token.Position{}
-	}
-
 	// 「obj.Parent() がパッケージスコープ (pkg.Scope()) と同じかどうか」で判定
-	if obj.Parent() != pkg.Scope() {
+	if obj.Parent() != obj.Pkg().Scope() {
 		// トップレベルのオブジェクトではない (例: struct フィールドやメソッドなど)
 		return "", token.Position{}
 	}
 
-	return pkg.Name(), fs.Position(obj.Pos())
+	return obj.Pkg().Name(), fs.Position(obj.Pos())
 }
 
 func isExported(name string) bool {
