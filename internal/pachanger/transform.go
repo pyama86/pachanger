@@ -162,10 +162,13 @@ func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *type
 // transformFile (DRYにまとめる)
 // ------------------------------
 func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarget bool) (bool, error) {
+	modified := false
 	if isTarget {
+		if file.Name.Name == t.oldPkg {
+			modified = true
+		}
 		file.Name.Name = t.newPkg
 	}
-	modified := false
 	filePkg := file.Name.Name
 
 	ast.Inspect(file, func(n ast.Node) bool {
