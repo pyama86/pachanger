@@ -321,7 +321,7 @@ func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info
 		return t.updateIdentInTargetFile(n, typeInfo)
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if ident.Name == t.newPkg && t.targetSymbols[n.Sel.Name] {
+			if (ident.Name == t.oldPkg || ident.Name == t.newPkg) && t.targetSymbols[n.Sel.Name] {
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
@@ -384,7 +384,7 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 		}
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if ident.Name == t.oldPkg && t.targetSymbols[n.Sel.Name] {
+			if (ident.Name == t.oldPkg || ident.Name == t.newPkg) && t.targetSymbols[n.Sel.Name] {
 				// 探索したファイル内のパッケージが既に新しいパッケージで、
 				// 今回変更する対象のファイルのAPIをコールしている場合、
 				// パッケージ名を削除する必要がある
