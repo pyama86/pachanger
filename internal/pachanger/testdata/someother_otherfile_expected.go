@@ -88,5 +88,20 @@ func AnotherFunc(as *AnotherStruct) {
 
 // どこかに定義されている同じパッケージの別の型
 func retTime() example.NotDefined {
+	a := struct {
+		Example     int
+		SomeExample uint
+		SomeFunc    func()
+	}{
+		Example:     1,
+		SomeExample: 2,
+		SomeFunc: func() {
+			b := struct {
+				Example     int
+				SomeExample uint
+			}{}
+		},
+	}
+
 	return example.NotDefined{}
 }
