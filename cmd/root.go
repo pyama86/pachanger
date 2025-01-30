@@ -203,13 +203,7 @@ func run() error {
 		}
 		oldPkg := pkg.Name
 		oldPkgPath := pkg.PkgPath
-		targetSymbols := map[string]bool{}
-		// pkgの中からエクスポートされているシンボルを抽出
-		for _, d := range pkg.TypesInfo.Defs {
-			if d != nil && d.Exported() && fs.Position(d.Pos()).Filename == absTargetFile && d.Parent() == d.Pkg().Scope() {
-				targetSymbols[d.Name()] = true
-			}
-		}
+		targetSymbols, otherSymbols := pachanger.FilterDefSymbols(fs, pkg, absTargetFile)
 
 		if os.Getenv("PACHANGER_PKG_DEBUG") != "" {
 			for _, pkg := range allPkgs {
@@ -252,9 +246,10 @@ func run() error {
 			addPrefix,
 			deletePrefix,
 			targetSymbols,
+			otherSymbols,
 		)
 
-		if err := transformer.TransformSymbolsInTargetFile(node, pkg.TypesInfo, absOutputFile); err != nil {
+		if err := transformer.TransformSymbolsInTargetFile(node, absOutputFile, pkg.TypesInfo); err != nil {
 			return fmt.Errorf("failed to transform symbols in target file: %w", err)
 		}
 
@@ -294,7 +289,7 @@ func run() error {
 
 				// 同じ Transformer インスタンスでOK。
 				// ただし、別ファイル用の *types.Info を渡す必要がある
-				return transformer.TransformSymbolsInOtherFile(nodeOther, pkgOther.TypesInfo, path)
+				return transformer.TransformSymbolsInOtherFile(nodeOther, path, pkgOther.TypesInfo)
 			})
 			return nil
 		})
