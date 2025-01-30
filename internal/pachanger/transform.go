@@ -158,9 +158,6 @@ func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, typeInfo *type
 	return nil
 }
 
-// ------------------------------
-// transformFile (DRYにまとめる)
-// ------------------------------
 func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarget bool) (bool, error) {
 	modified := false
 	if isTarget {
@@ -172,132 +169,8 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 	filePkg := file.Name.Name
 
 	ast.Inspect(file, func(n ast.Node) bool {
-		switch node := n.(type) {
-		case *ast.Field:
-			if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-		case *ast.ValueSpec:
-			if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-			for _, val := range node.Values {
-				if t.updateExpr(val, typeInfo, filePkg, isTarget) {
-					modified = true
-				}
-			}
-			for _, name := range node.Names {
-				if t.updateExpr(name, typeInfo, filePkg, isTarget) {
-					modified = true
-				}
-			}
-
-		case *ast.FuncDecl:
-			if node.Type.Params != nil {
-				for _, p := range node.Type.Params.List {
-					if t.updateExpr(p.Type, typeInfo, filePkg, isTarget) {
-						modified = true
-					}
-				}
-			}
-			if node.Type.Results != nil {
-				for _, r := range node.Type.Results.List {
-					if t.updateExpr(r.Type, typeInfo, filePkg, isTarget) {
-						modified = true
-					}
-				}
-			}
-			if node.Body != nil {
-				ast.Inspect(node.Body, func(bodyNode ast.Node) bool {
-					if ex, ok := bodyNode.(ast.Expr); ok {
-						if t.updateExpr(ex, typeInfo, filePkg, isTarget) {
-							modified = true
-						}
-					}
-					return true
-				})
-			}
-
-		case *ast.TypeSpec:
-			if t.updateExpr(node.Name, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-			if node.Assign != token.NoPos {
-				if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-					modified = true
-				}
-			} else {
-				if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-					modified = true
-				}
-			}
-
-		case *ast.TypeAssertExpr:
-			if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-
-		case *ast.TypeSwitchStmt:
-			for _, stmt := range node.Body.List {
-				if cc, ok := stmt.(*ast.CaseClause); ok {
-					for i, expr := range cc.List {
-						if t.updateExpr(expr, typeInfo, filePkg, isTarget) {
-							modified = true
-							cc.List[i] = expr
-						}
-					}
-				}
-			}
-
-		case *ast.CaseClause:
-			for i, expr := range node.List {
-				if t.updateExpr(expr, typeInfo, filePkg, isTarget) {
-					modified = true
-					node.List[i] = expr
-				}
-			}
-
-		case *ast.CallExpr:
-			if t.updateExpr(node.Fun, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-			for i, arg := range node.Args {
-				if t.updateExpr(arg, typeInfo, filePkg, isTarget) {
-					modified = true
-					node.Args[i] = arg
-				}
-			}
-
-		case *ast.CompositeLit:
-			if t.updateExpr(node.Type, typeInfo, filePkg, isTarget) {
-				modified = true
-			}
-			for _, elt := range node.Elts {
-				if kv, ok := elt.(*ast.KeyValueExpr); ok {
-					if t.updateExpr(kv.Value, typeInfo, filePkg, isTarget) {
-						modified = true
-					}
-				} else {
-					if t.updateExpr(elt, typeInfo, filePkg, isTarget) {
-						modified = true
-					}
-				}
-			}
-		case *ast.IndexExpr: // 単一のジェネリック型
-			mod := t.updateExpr(node.X, typeInfo, filePkg, isTarget)
-			if t.updateExpr(node.Index, typeInfo, filePkg, isTarget) {
-				mod = true
-			}
-			return mod
-
-		case *ast.IndexListExpr: // 複数のジェネリック型
-			mod := t.updateExpr(node.X, typeInfo, filePkg, isTarget)
-			for _, idx := range node.Indices {
-				if t.updateExpr(idx, typeInfo, filePkg, isTarget) {
-					mod = true
-				}
-			}
-			return mod
+		if t.updateExpr(n, typeInfo, filePkg, isTarget) {
+			modified = true
 		}
 
 		return true
@@ -305,131 +178,206 @@ func (t *Transformer) transformFile(file *ast.File, typeInfo *types.Info, isTarg
 
 	return modified, nil
 }
+func (t *Transformer) addDoneList(e *ast.Ident) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.doneIdent[e] = true
+}
 
 // -----------------------------------------
 // updateExpr: isTarget に応じて関数を切替
 // -----------------------------------------
-func (t *Transformer) updateExpr(n ast.Node, typeInfo *types.Info, filePkg string, isTarget bool) bool {
-	if isTarget {
-		return t.updateExprInTargetFile(n, typeInfo)
-	}
-	return t.updateExprInOtherFile(n, typeInfo, filePkg)
-}
-
-func (t *Transformer) updateExprInTargetFile(node ast.Node, typeInfo *types.Info) bool {
+func (t *Transformer) updateExpr(node ast.Node, typeInfo *types.Info, filePkg string, isTarget bool) bool {
+	mod := false
 	switch n := node.(type) {
 	case *ast.Field:
-		return false
+		if n.Names != nil {
+			for _, name := range n.Names {
+				if t.updateExpr(name, typeInfo, filePkg, isTarget) {
+					mod = true
+				}
+			}
+		}
+		if t.updateExpr(n.Type, typeInfo, filePkg, isTarget) {
+			return true
+		}
 	case *ast.Ident:
-		return t.updateIdentInTargetFile(n, typeInfo)
+		t.mu.Lock()
+		if t.doneIdent[n] {
+			t.mu.Unlock()
+			return false
+		}
+		t.doneIdent[n] = true
+		t.mu.Unlock()
+
+		if isTarget {
+			return t.updateIdentInTargetFile(n, typeInfo)
+		} else {
+			return t.updateIdentInOtherFile(n, typeInfo, filePkg)
+		}
+
 	case *ast.SelectorExpr:
 		if ident, ok := n.X.(*ast.Ident); ok {
-			if ident.Name == t.newPkg {
+			if isTarget {
+				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Target", ident.Name, n.Sel.Name))
 				// 対象のファイルで、新しいパッケージを参照している場合
 				// パッケージ名を削除する必要がある
-				ident.Name = SHOULD_BE_DELETED
-				t.mu.Lock()
-				defer t.mu.Unlock()
-				t.doneIdent[n.Sel] = true
-				return true
-			} else if ident.Name != t.oldPkg && ident.Name != t.newPkg {
-				t.mu.Lock()
-				defer t.mu.Unlock()
-				t.doneIdent[n.Sel] = true
-			}
-		}
-
-	case *ast.StarExpr:
-		return t.updateExprInTargetFile(n.X, typeInfo)
-	case *ast.ArrayType:
-		mod := t.updateExprInTargetFile(n.Elt, typeInfo)
-		return mod
-	case *ast.MapType:
-		mod := t.updateExprInTargetFile(n.Key, typeInfo)
-		if t.updateExprInTargetFile(n.Value, typeInfo) {
-			mod = true
-		}
-		return mod
-	case *ast.ChanType:
-		return t.updateExprInTargetFile(n.Value, typeInfo)
-	case *ast.CallExpr:
-		mod := t.updateExprInTargetFile(n.Fun, typeInfo)
-		for _, arg := range n.Args {
-			if t.updateExprInTargetFile(arg, typeInfo) {
-				mod = true
-			}
-		}
-		return mod
-	case *ast.TypeSpec:
-		return t.updateExprInTargetFile(n.Type, typeInfo)
-	}
-	return false
-}
-
-func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info, filePkg string) bool {
-	switch n := node.(type) {
-	case *ast.Ident:
-		if n.Name == t.newPkg {
-			return false
-		}
-
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		if t.doneIdent[n] {
-			return false
-		}
-		return t.updateIdentInOtherFile(n, typeInfo, filePkg)
-	case *ast.GenDecl:
-		for _, spec := range n.Specs {
-			if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-				if t.updateExprInOtherFile(typeSpec.Type, typeInfo, filePkg) {
-					return true
-				}
-			}
-		}
-	case *ast.SelectorExpr:
-		if ident, ok := n.X.(*ast.Ident); ok {
-			// 変更前のパッケージ名でアクセスしている
-			if t.targetSymbols[n.Sel.Name] && ident.Name == t.oldPkg {
-				if t.newPkg == filePkg {
+				if ident.Name == t.newPkg {
+					slog.Debug(fmt.Sprintf("Delete %s in %s.%s in %v", ident.Name, ident.Name, n.Sel.Name, isTarget))
 					ident.Name = SHOULD_BE_DELETED
+					slog.Debug(fmt.Sprintf("Add DoneIdent %s in %v", n.Sel.Name, isTarget))
+					t.addDoneList(n.Sel)
 					return true
 				}
-				ident.Name = t.newPkg
-				t.mu.Lock()
-				defer t.mu.Unlock()
-				t.doneIdent[n.Sel] = true
-				return true
-				// 無関係なパッケージは置き換えない
-			} else if ident.Name != t.oldPkg && ident.Name != t.newPkg {
-				t.mu.Lock()
-				defer t.mu.Unlock()
-				t.doneIdent[n.Sel] = true
+			} else {
+				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Other", ident.Name, n.Sel.Name))
+				// 変更前のパッケージ名でアクセスしている
+				if t.targetSymbols[n.Sel.Name] && ident.Name == t.oldPkg {
+					if t.newPkg == filePkg {
+						slog.Debug(fmt.Sprintf("Delete %s in %s.%s in Other", ident.Name, ident.Name, n.Sel.Name))
+						ident.Name = SHOULD_BE_DELETED
+						return true
+					}
+					ident.Name = t.newPkg
+					slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other", n.Sel.Name))
+					t.addDoneList(n.Sel)
+					return true
+				} else {
+					slog.Debug(fmt.Sprintf("Skip %s in %s.%s in synbol %v in Other", ident.Name, ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name]))
+				}
 			}
+			// 無関係なパッケージは置き換えない
+			if ident.Name != t.oldPkg && ident.Name != t.newPkg {
+				slog.Debug(fmt.Sprintf("Add DoneIdent %s in %v", n.Sel.Name, isTarget))
+				t.addDoneList(n.Sel)
+			}
+
 		}
-	case *ast.StarExpr:
-		return t.updateExprInOtherFile(n.X, typeInfo, filePkg)
-	case *ast.ArrayType:
-		mod := t.updateExprInOtherFile(n.Elt, typeInfo, filePkg)
-		return mod
-	case *ast.MapType:
-		mod := t.updateExprInOtherFile(n.Key, typeInfo, filePkg)
-		if t.updateExprInOtherFile(n.Value, typeInfo, filePkg) {
+	case *ast.ValueSpec:
+		if t.updateExpr(n.Type, typeInfo, filePkg, isTarget) {
 			mod = true
 		}
-		return mod
-	case *ast.ChanType:
-		return t.updateExprInOtherFile(n.Value, typeInfo, filePkg)
-	case *ast.CallExpr:
-		mod := t.updateExprInOtherFile(n.Fun, typeInfo, filePkg)
-		for _, arg := range n.Args {
-			if t.updateExprInOtherFile(arg, typeInfo, filePkg) {
+		for _, val := range n.Values {
+			if t.updateExpr(val, typeInfo, filePkg, isTarget) {
 				mod = true
 			}
 		}
-		return mod
+		for _, name := range n.Names {
+			if t.updateExpr(name, typeInfo, filePkg, isTarget) {
+				mod = true
+			}
+		}
+	case *ast.StarExpr:
+		return t.updateExpr(n.X, typeInfo, filePkg, isTarget)
+	case *ast.ArrayType:
+		return t.updateExpr(n.Elt, typeInfo, filePkg, isTarget)
+	case *ast.MapType:
+		mod = t.updateExpr(n.Key, typeInfo, filePkg, isTarget)
+		if t.updateExpr(n.Value, typeInfo, filePkg, isTarget) {
+			mod = true
+		}
+	case *ast.ChanType:
+		return t.updateExpr(n.Value, typeInfo, filePkg, isTarget)
+	case *ast.CallExpr:
+		mod = t.updateExpr(n.Fun, typeInfo, filePkg, isTarget)
+		for _, arg := range n.Args {
+			if t.updateExpr(arg, typeInfo, filePkg, isTarget) {
+				mod = true
+			}
+		}
+
+	case *ast.TypeAssertExpr:
+		return t.updateExpr(n.Type, typeInfo, filePkg, isTarget)
+
+	case *ast.TypeSwitchStmt:
+		for _, stmt := range n.Body.List {
+			if cc, ok := stmt.(*ast.CaseClause); ok {
+				for i, expr := range cc.List {
+					if t.updateExpr(expr, typeInfo, filePkg, isTarget) {
+						mod = true
+						cc.List[i] = expr
+					}
+				}
+			}
+		}
+
+	case *ast.CaseClause:
+		for i, expr := range n.List {
+			if t.updateExpr(expr, typeInfo, filePkg, isTarget) {
+				mod = true
+				n.List[i] = expr
+			}
+		}
+
+	case *ast.TypeSpec:
+		mod = t.updateExpr(n.Name, typeInfo, filePkg, isTarget)
+		if n.Assign != token.NoPos {
+			if t.updateExpr(n.Type, typeInfo, filePkg, isTarget) {
+				mod = true
+			}
+		} else {
+			if t.updateExpr(n.Type, typeInfo, filePkg, isTarget) {
+				mod = true
+			}
+		}
+	case *ast.CompositeLit:
+		mod = t.updateExpr(n.Type, typeInfo, filePkg, isTarget)
+		for _, elt := range n.Elts {
+			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				if t.updateExpr(kv.Value, typeInfo, filePkg, isTarget) {
+					mod = true
+				}
+			} else {
+				if t.updateExpr(elt, typeInfo, filePkg, isTarget) {
+					mod = true
+				}
+			}
+		}
+	case *ast.FuncDecl:
+		if n.Type.Params != nil {
+			for _, p := range n.Type.Params.List {
+				if t.updateExpr(p.Type, typeInfo, filePkg, isTarget) {
+					mod = true
+				}
+			}
+		}
+		if n.Type.Results != nil {
+			for _, r := range n.Type.Results.List {
+				if t.updateExpr(r.Type, typeInfo, filePkg, isTarget) {
+					mod = true
+				}
+			}
+		}
+		if n.Body != nil {
+			ast.Inspect(n.Body, func(bodyNode ast.Node) bool {
+				if ex, ok := bodyNode.(ast.Expr); ok {
+					if t.updateExpr(ex, typeInfo, filePkg, isTarget) {
+						mod = true
+					}
+				}
+				return true
+			})
+		}
+	case *ast.IndexExpr: // 単一のジェネリック型
+		if t.updateExpr(n.X, typeInfo, filePkg, isTarget) {
+			mod = true
+		}
+		if t.updateExpr(n.Index, typeInfo, filePkg, isTarget) {
+			mod = true
+		}
+	case *ast.IndexListExpr: // 複数のジェネリック型
+		if t.updateExpr(n.X, typeInfo, filePkg, isTarget) {
+			mod = true
+		}
+		for _, idx := range n.Indices {
+			if t.updateExpr(idx, typeInfo, filePkg, isTarget) {
+				mod = true
+			}
+		}
+
 	}
-	return false
+
+	return mod
 }
 
 // ----------------------------------------
@@ -437,17 +385,16 @@ func (t *Transformer) updateExprInOtherFile(node ast.Node, typeInfo *types.Info,
 // ----------------------------------------
 func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, typeInfo *types.Info) bool {
 	pkgName := getPkgNameForIdent(e, t.fs, typeInfo)
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if pkgName == "" {
 		return false
 	}
 	// 同じパッケージで対象のファイルのシンボルではない場合
-	if pkgName == t.oldPkg && !t.targetSymbols[e.Name] && !t.doneIdent[e] {
+	if pkgName == t.oldPkg && !t.targetSymbols[e.Name] {
 		e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
 		return true
 	} else if pkgName == t.oldPkg && t.targetSymbols[e.Name] {
 		e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+		return true
 	}
 	return false
 }
@@ -461,10 +408,14 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, typeInfo *types.Info,
 	if pkgName == t.oldPkg && t.targetSymbols[e.Name] {
 		if filePkg != t.newPkg {
 			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			return true
 		} else {
+			before := e.Name
 			e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			if before != e.Name {
+				return true
+			}
 		}
-		return true
 	}
 	return false
 }
