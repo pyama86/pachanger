@@ -44,6 +44,7 @@ func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, new
 		newPkgPath = oldPkgPath[:pos] + newPkg
 	}
 
+	slog.Debug("NewTransformer", slog.String("oldFile", oldFile), slog.String("oldPkg", oldPkg), slog.String("oldPkgPath", oldPkgPath), slog.String("newPkgPath", newPkgPath), slog.String("newPkg", newPkg), slog.String("addPrefix", addPrefix), slog.String("deletePrefix", deletePrefix))
 	return &Transformer{
 		fs:            fs,
 		oldFile:       oldFile,
@@ -263,7 +264,7 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 
 						// もしくは新旧関係ないパッケージのファイルが
 						// 変更前か変更後のパッケージ名でアクセスしている
-					} else if (t.oldPkg == filePkg || t.oldPkg != filePkg) && ident.Name == t.oldPkg {
+					} else if (t.oldPkg == filePkg || t.newPkg == filePkg) && ident.Name == t.oldPkg {
 						ident.Name = t.newPkg
 						slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other", n.Sel.Name))
 						t.addDoneList(n.Sel)
@@ -300,6 +301,7 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 	case *ast.KeyValueExpr:
 		// 構造体のフィールド名は変更しない
 		if ident, ok := n.Key.(*ast.Ident); ok {
+			slog.Debug(fmt.Sprintf("Skip KeyValueExpr %s in Target", ident.Name))
 			t.addDoneList(ident)
 		}
 	case *ast.ChanType:
@@ -417,7 +419,12 @@ func usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
 	// 変更前と同じパッケージのファイルで対象のファイルのシンボルではない場合
 	if t.otherSymbols[e.Name] && usesPackageName(e, typesInfo) == t.oldPkg {
-		e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+		// 変更前のパッケージと新しいパッケージが同じ場合(上書きなど)
+		if t.newPkg == t.oldPkg && filePkg == t.oldPkg {
+			return false
+		} else {
+			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+		}
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))

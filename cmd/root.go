@@ -201,9 +201,13 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("failed to find package for file: %w", err)
 		}
-		oldPkg := pkg.Name
+		oldPkg := node.Name.Name
 		oldPkgPath := pkg.PkgPath
 		targetSymbols, otherSymbols := pachanger.FilterDefSymbols(fs, pkg, absTargetFile)
+
+		if len(targetSymbols) == 0 || len(otherSymbols) == 0 {
+			return fmt.Errorf("no symbols found in target file: %s may be having syntax errors", absTargetFile)
+		}
 
 		if os.Getenv("PACHANGER_PKG_DEBUG") != "" {
 			for _, pkg := range allPkgs {
