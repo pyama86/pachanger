@@ -261,10 +261,9 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 						return true
 						// もとのパッケージのファイルが
 						// 変更前のパッケージ名でアクセスしている
-
 						// もしくは新旧関係ないパッケージのファイルが
 						// 変更前か変更後のパッケージ名でアクセスしている
-					} else if (t.oldPkg == filePkg || t.newPkg == filePkg) && ident.Name == t.oldPkg {
+					} else if (t.oldPkg == filePkg || t.newPkg != filePkg) && ident.Name == t.oldPkg {
 						ident.Name = t.newPkg
 						slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other", n.Sel.Name))
 						t.addDoneList(n.Sel)
