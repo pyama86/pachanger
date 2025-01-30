@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.0.21](https://github.com/pyama86/pachanger/compare/v0.0.20...v0.0.21) - 2025-01-30
+
 ## [v0.0.20](https://github.com/pyama86/pachanger/compare/v0.0.19...v0.0.20) - 2025-01-29
 
 ## [v0.0.19](https://github.com/pyama86/pachanger/compare/v0.0.18...v0.0.19) - 2025-01-29
