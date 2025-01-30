@@ -231,17 +231,24 @@ func (t *Transformer) updateExpr(node ast.Node, typeInfo *types.Info, filePkg st
 				}
 			} else {
 				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Other", ident.Name, n.Sel.Name))
-				// 変更前のパッケージ名でアクセスしている
-				if t.targetSymbols[n.Sel.Name] && ident.Name == t.oldPkg {
-					if t.newPkg == filePkg {
+				if t.targetSymbols[n.Sel.Name] {
+					// 新しいパッケージのファイルが
+					// 変更前か変更後のパッケージ名でアクセスしている
+					if t.newPkg == filePkg && (ident.Name == t.oldPkg || ident.Name == t.newPkg) {
 						slog.Debug(fmt.Sprintf("Delete %s in %s.%s in Other", ident.Name, ident.Name, n.Sel.Name))
 						ident.Name = SHOULD_BE_DELETED
 						return true
+						// もとのパッケージのファイルが
+						// 変更前のパッケージ名でアクセスしている
+
+						// もしくは新旧関係ないパッケージのファイルが
+						// 変更前のパッケージ名でアクセスしている
+					} else if (t.oldPkg == filePkg || t.oldPkg != filePkg) && ident.Name == t.oldPkg {
+						ident.Name = t.newPkg
+						slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other", n.Sel.Name))
+						t.addDoneList(n.Sel)
+						return true
 					}
-					ident.Name = t.newPkg
-					slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other", n.Sel.Name))
-					t.addDoneList(n.Sel)
-					return true
 				} else {
 					slog.Debug(fmt.Sprintf("Skip %s in %s.%s in synbol %v in Other", ident.Name, ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name]))
 				}
