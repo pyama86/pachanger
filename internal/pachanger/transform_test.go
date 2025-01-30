@@ -38,7 +38,7 @@ func TestTransformTargetFile(t *testing.T) {
 	inputPath := "example/target_input.go"
 	expectedPath := "target_expected.go"
 	outputPath := "target_output.go"
-	os.Remove(outputPath)
+	os.Remove(filepath.Join(workDir, outputPath))
 
 	fs := token.NewFileSet()
 	pkgs, err := pachanger.LoadPackages(fs, workDir, nil)
@@ -49,7 +49,9 @@ func TestTransformTargetFile(t *testing.T) {
 
 	targetSymbols, otherSymbols := pachanger.FilterDefSymbols(fs, pkg, filepath.Join(workDir, inputPath))
 	transformer := pachanger.NewTransformer(fs, workDir, filepath.Join(workDir, inputPath), "example", "", "changed_example", "", "", targetSymbols, otherSymbols)
+
 	err = transformer.TransformSymbolsInTargetFile(node, filepath.Join(workDir, outputPath), pkg.TypesInfo)
+	pachanger.DoneFile = map[string]bool{}
 	assert.NoError(t, err)
 
 	diff, err := compareFiles(filepath.Join(workDir, outputPath), filepath.Join(workDir, expectedPath))
@@ -73,7 +75,7 @@ func TestTransformOtherFile(t *testing.T) {
 		inputPath := "example/some_example.go"
 		expectedPath := "some_example_expected.go"
 		outputPath := "some_example_output.go"
-		os.Remove(outputPath)
+		os.Remove(filepath.Join(workDir, outputPath))
 
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
@@ -94,7 +96,7 @@ func TestTransformOtherFile(t *testing.T) {
 		inputPath := "someother/otherfile_input.go"
 		expectedPath := "someother_otherfile_expected.go"
 		outputPath := "someother_otherfile_output.go"
-		os.Remove(outputPath)
+		os.Remove(filepath.Join(workDir, outputPath))
 
 		_, pkg, err := pachanger.FindPackageForFile(fs, pkgs, targetPath)
 		assert.NoError(t, err)
@@ -118,7 +120,7 @@ func TestTransformOtherFile(t *testing.T) {
 		inputPath := "changed_example/otherfile_input.go"
 		expectedPath := "changed_example_otherfile_expected.go"
 		outputPath := "changed_example_otherfile_output.go"
-		defer os.Remove(outputPath)
+		os.Remove(filepath.Join(workDir, outputPath))
 
 		_, pkg, err := pachanger.FindPackageForFile(fs, pkgs, targetPath)
 		assert.NoError(t, err)

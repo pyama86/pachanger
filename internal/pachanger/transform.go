@@ -36,6 +36,14 @@ type Transformer struct {
 	mu            sync.Mutex
 }
 
+var DoneFile = map[string]bool{}
+
+func (t *Transformer) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.doneIdent = map[*ast.Ident]bool{}
+}
+
 // NewTransformer は Transformer を生成
 func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, addPrefix, deletePrefix string, targetSymbols, otherSymbols map[string]bool) *Transformer {
 	newPkgPath := ""
@@ -149,6 +157,8 @@ func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, output string
 	if err != nil {
 		return err
 	}
+
+	DoneFile[t.fs.Position(node.Pos()).Filename] = true
 	if _, err := os.Stat(output); err != nil || modified {
 		// import pathを追加
 		if t.oldPkgPath != "" && !astutil.UsesImport(node, t.oldPkgPath) {
@@ -213,6 +223,7 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 		if n.Names != nil {
 			for _, name := range n.Names {
 				// 構造体のフィールド名は変更しない
+				slog.Debug(fmt.Sprintf("Skip Field %s in synbol %v", name.Name, t.targetSymbols[name.Name]))
 				t.addDoneList(name)
 			}
 		}
@@ -221,11 +232,12 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 		}
 	case *ast.Ident:
 		t.mu.Lock()
-		defer t.mu.Unlock()
 		if t.doneIdent[n] {
+			slog.Debug(fmt.Sprintf("Skip Ident %s in synbol %v", n.Name, t.targetSymbols[n.Name]))
+			t.mu.Unlock()
 			return false
 		}
-		t.doneIdent[n] = true
+		t.mu.Unlock()
 
 		if isTarget {
 			return t.updateIdentInTargetFile(n, filePkg, typesInfo)
@@ -237,6 +249,7 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 		if ident, ok := n.X.(*ast.Ident); ok {
 			// 無関係なパッケージは置き換えない
 			if ident.Name != t.oldPkg && ident.Name != t.newPkg {
+				slog.Debug(fmt.Sprintf("Skip %s.%s in synbol %v", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name]))
 				t.addDoneList(n.Sel)
 				return false
 			}
@@ -336,12 +349,7 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 		}
 
 	case *ast.TypeSpec:
-		if isTarget {
-			mod = t.updateExpr(n.Name, filePkg, typesInfo, isTarget)
-		} else {
-			// 他ファイルの定義の場合は変更しない
-			t.addDoneList(n.Name)
-		}
+		mod = t.updateExpr(n.Name, filePkg, typesInfo, isTarget)
 		if n.Assign != token.NoPos {
 			if t.updateExpr(n.Type, filePkg, typesInfo, isTarget) {
 				mod = true
@@ -408,8 +416,13 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 	return mod
 }
 
-func usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
+func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 	if o, ok := typesInfo.Uses[e]; ok && o != nil && o.Pkg() != nil {
+		// 処理済みのファイルのパッケージは新しいパッケージ名を返す
+		if DoneFile[t.fs.Position(o.Pos()).Filename] {
+			fmt.Printf("usesPackageName: %s %s %s\n", e.Name, o.Pkg().Name(), t.newPkg)
+			return t.newPkg
+		}
 		return o.Pkg().Name()
 	}
 	return ""
@@ -417,7 +430,7 @@ func usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 
 func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
 	// 変更前と同じパッケージのファイルで対象のファイルのシンボルではない場合
-	if t.otherSymbols[e.Name] && usesPackageName(e, typesInfo) == t.oldPkg {
+	if t.otherSymbols[e.Name] && t.usesPackageName(e, typesInfo) == t.oldPkg {
 		// 変更前のパッケージと新しいパッケージが同じ場合(上書きなど)
 		if t.newPkg == t.oldPkg && filePkg == t.oldPkg {
 			return false
@@ -436,7 +449,7 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, filePkg string, types
 	// 変更前のパッケージ
 	if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		// 変更前のファイルのシンボルを利用している
-		if filePkg != t.newPkg && usesPackageName(e, typesInfo) == t.oldPkg {
+		if filePkg != t.newPkg && t.usesPackageName(e, typesInfo) == t.oldPkg {
 			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 			return true
 		} else {

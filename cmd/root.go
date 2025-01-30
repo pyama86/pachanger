@@ -276,21 +276,19 @@ func run() error {
 				return nil
 			}
 
-			slog.DebugContext(ctx, "Processing other file", slog.String("file", path))
 			g.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
 				nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
 				if errFilter != nil {
-					// パースできないファイルならスキップ（警告のみ）
-					slog.WarnContext(ctx, "Error finding package for file", slog.String("file", path), slog.Any("error", errFilter))
 					return nil
 				}
 				if nodeOther == nil || pkgOther == nil {
 					return nil
 				}
 
+				slog.DebugContext(ctx, "Processing other file", slog.String("file", path), slog.String("pkg", nodeOther.Name.Name))
 				// 同じ Transformer インスタンスでOK。
 				// ただし、別ファイル用の *types.Info を渡す必要がある
 				return transformer.TransformSymbolsInOtherFile(nodeOther, path, pkgOther.TypesInfo)
@@ -311,6 +309,7 @@ func run() error {
 				return fmt.Errorf("failed to remove target file: %w", err)
 			}
 		}
+		transformer.Reset()
 		slog.InfoContext(ctx, "Successfully updated file", slog.String("file", absOutputFile))
 	}
 	slog.InfoContext(ctx, "Successfully updated references", slog.String("newPkg", newPkg))
