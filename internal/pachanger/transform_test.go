@@ -38,7 +38,7 @@ func TestTransformTargetFile(t *testing.T) {
 	inputPath := "example/target_input.go"
 	expectedPath := "target_expected.go"
 	outputPath := "target_output.go"
-	defer os.Remove(outputPath)
+	os.Remove(outputPath)
 
 	fs := token.NewFileSet()
 	pkgs, err := pachanger.LoadPackages(fs, workDir, nil)
@@ -73,7 +73,7 @@ func TestTransformOtherFile(t *testing.T) {
 		inputPath := "example/some_example.go"
 		expectedPath := "some_example_expected.go"
 		outputPath := "some_example_output.go"
-		defer os.Remove(outputPath)
+		os.Remove(outputPath)
 
 		node, pkg, err := pachanger.FindPackageForFile(fs, pkgs, filepath.Join(workDir, inputPath))
 		assert.NoError(t, err)
@@ -94,7 +94,7 @@ func TestTransformOtherFile(t *testing.T) {
 		inputPath := "someother/otherfile_input.go"
 		expectedPath := "someother_otherfile_expected.go"
 		outputPath := "someother_otherfile_output.go"
-		defer os.Remove(outputPath)
+		os.Remove(outputPath)
 
 		_, pkg, err := pachanger.FindPackageForFile(fs, pkgs, targetPath)
 		assert.NoError(t, err)
