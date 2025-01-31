@@ -181,6 +181,9 @@ func run() error {
 		deletePrefix,
 		buildFlags,
 	)
+	if err != nil {
+		return fmt.Errorf("failed to create transformer: %w", err)
+	}
 
 	for _, absTargetFile := range expanded {
 		slog.InfoContext(ctx, "Processing target file", slog.String("file", absTargetFile))
