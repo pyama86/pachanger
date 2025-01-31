@@ -26,5 +26,6 @@ go.work.sum
 
 bin/pachanger
 
-internal/pachanger/testdata/output
+internal/pachanger/testdata/output/*
+!internal/pachanger/testdata/output/.gitkeep
 
