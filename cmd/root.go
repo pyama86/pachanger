@@ -5,12 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/token"
 	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/pyama86/pachanger/internal/pachanger"
@@ -174,14 +172,14 @@ func run() error {
 			expanded = append(expanded, f)
 		}
 	}
-	fs := token.NewFileSet()
-	slog.InfoContext(ctx, "Loading packages", slog.String("workDir", absWorkDir))
-	allPkgs, err := pachanger.LoadPackages(fs, absWorkDir, buildFlags)
-	if err != nil {
-		return fmt.Errorf("failed to load packages: %w", err)
-	}
-
-	slog.InfoContext(ctx, "Loaded packages", slog.String("workDir", absWorkDir))
+	// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
+	transformer, err := pachanger.NewTransformer(
+		absWorkDir,
+		newPkg,
+		addPrefix,
+		deletePrefix,
+		buildFlags,
+	)
 
 	for _, absTargetFile := range expanded {
 		slog.InfoContext(ctx, "Processing target file", slog.String("file", absTargetFile))
@@ -197,69 +195,16 @@ func run() error {
 			}
 		}
 
-		node, pkg, err := pachanger.FindPackageForFile(fs, allPkgs, absTargetFile)
 		if err != nil {
-			return fmt.Errorf("failed to find package for file: %w", err)
-		}
-		oldPkg := node.Name.Name
-		oldPkgPath := pkg.PkgPath
-		targetSymbols, otherSymbols := pachanger.FilterDefSymbols(fs, pkg, absTargetFile)
-
-		if len(targetSymbols) == 0 || len(otherSymbols) == 0 {
-			return fmt.Errorf("no symbols found in target file: %s may be having syntax errors", absTargetFile)
+			return fmt.Errorf("failed to create transformer: %w", err)
 		}
 
-		if os.Getenv("PACHANGER_PKG_DEBUG") != "" {
-			for _, pkg := range allPkgs {
-				if pkg.Name != oldPkg && pkg.Name != newPkg {
-					continue
-				}
-				fmt.Printf("Loaded Package: %s\n", pkg.PkgPath)
-				if pkg.Types != nil {
-					fmt.Printf("  Package Name: %s\n", pkg.Types.Name())
-				}
-
-				fmt.Println("  --- Defs ---")
-				for id, obj := range pkg.TypesInfo.Defs {
-					if obj != nil {
-						fmt.Printf("  Def: %s (%s)\n", id.Name, obj.Type().String())
-					} else {
-						fmt.Printf("  Def: %s (invalid type)\n", id.Name)
-					}
-				}
-
-				fmt.Println("  --- Uses ---")
-				for id, obj := range pkg.TypesInfo.Uses {
-					if obj != nil {
-						fmt.Printf("  Use: %s (%s)\n", id.Name, obj.Type().String())
-					} else {
-						fmt.Printf("  Use: %s (invalid type)\n", id.Name)
-					}
-				}
-			}
-		}
-
-		// pachangerパッケージで定義した構造体を使って、ターゲットファイルを変換
-		transformer := pachanger.NewTransformer(
-			fs,
-			absWorkDir,
-			absTargetFile,
-			oldPkg,
-			oldPkgPath,
-			newPkg,
-			addPrefix,
-			deletePrefix,
-			targetSymbols,
-			otherSymbols,
-		)
-
-		if err := transformer.TransformSymbolsInTargetFile(node, absOutputFile, pkg.TypesInfo); err != nil {
+		if err := transformer.TransformSymbolsInTargetFile(absTargetFile, absOutputFile); err != nil {
 			return fmt.Errorf("failed to transform symbols in target file: %w", err)
 		}
 
 		// 他ファイルを並列で変換
 		g, ctx := errgroup.WithContext(ctx)
-		sem := make(chan struct{}, runtime.NumCPU()/2)
 
 		err = filepath.WalkDir(absWorkDir, func(path string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -277,21 +222,9 @@ func run() error {
 			}
 
 			g.Go(func() error {
-				sem <- struct{}{}
-				defer func() { <-sem }()
 
-				nodeOther, pkgOther, errFilter := pachanger.FindPackageForFile(fs, allPkgs, path)
-				if errFilter != nil {
-					return nil
-				}
-				if nodeOther == nil || pkgOther == nil {
-					return nil
-				}
-
-				slog.DebugContext(ctx, "Processing other file", slog.String("file", path), slog.String("pkg", nodeOther.Name.Name))
-				// 同じ Transformer インスタンスでOK。
-				// ただし、別ファイル用の *types.Info を渡す必要がある
-				return transformer.TransformSymbolsInOtherFile(nodeOther, path, pkgOther.TypesInfo)
+				slog.DebugContext(ctx, "Processing other file", slog.String("file", path))
+				return transformer.TransformSymbolsInOtherFile(path, path)
 			})
 			return nil
 		})
@@ -309,8 +242,10 @@ func run() error {
 				return fmt.Errorf("failed to remove target file: %w", err)
 			}
 		}
-		transformer.Reset()
 		slog.InfoContext(ctx, "Successfully updated file", slog.String("file", absOutputFile))
+	}
+	if err := transformer.Dump(); err != nil {
+		return fmt.Errorf("failed to dump transformer: %w", err)
 	}
 	slog.InfoContext(ctx, "Successfully updated references", slog.String("newPkg", newPkg))
 	return nil

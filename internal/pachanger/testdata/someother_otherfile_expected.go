@@ -3,6 +3,7 @@ package someother
 import (
 	"fmt"
 
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/changed_example"
 	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
 )
 

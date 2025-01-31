@@ -2,6 +2,8 @@ package example
 
 import (
 	"fmt"
+
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/changed_example"
 )
 
 // 追加のジェネリクス型（ネストで利用される）

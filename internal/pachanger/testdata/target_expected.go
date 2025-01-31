@@ -2,6 +2,8 @@ package changed_example
 
 import (
 	"fmt"
+
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
 )
 
 // 別名型

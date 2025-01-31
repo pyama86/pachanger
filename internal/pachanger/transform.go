@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
@@ -20,9 +21,15 @@ import (
 
 const SHOULD_BE_DELETED = "SHOULD_BE_DELETED"
 
+type astWithOutFile struct {
+	node     *ast.File
+	output   string
+	modified bool
+	pkgName  string
+}
+
 type Transformer struct {
 	fs            *token.FileSet
-	oldFile       string
 	oldPkg        string
 	oldPkgPath    string
 	newPkgPath    string
@@ -33,49 +40,40 @@ type Transformer struct {
 	doneIdent     map[*ast.Ident]bool
 	targetSymbols map[string]bool
 	otherSymbols  map[string]bool
+	doneFile      map[string]*astWithOutFile
+	allPkgs       []*packages.Package
 	mu            sync.Mutex
 }
 
-var DoneFile = map[string]bool{}
-
-func (t *Transformer) Reset() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.doneIdent = map[*ast.Ident]bool{}
-}
-
 // NewTransformer は Transformer を生成
-func NewTransformer(fs *token.FileSet, workDir, oldFile, oldPkg, oldPkgPath, newPkg, addPrefix, deletePrefix string, targetSymbols, otherSymbols map[string]bool) *Transformer {
-	newPkgPath := ""
-	pos := strings.LastIndex(oldPkgPath, oldPkg)
-	if pos > 0 {
-		newPkgPath = oldPkgPath[:pos] + newPkg
+func NewTransformer(workDir, newPkg, addPrefix, deletePrefix string, buildFlags []string) (*Transformer, error) {
+	fs := token.NewFileSet()
+	slog.Info("Loading packages", slog.String("workDir", workDir))
+	allPkgs, err := loadPackages(fs, workDir, buildFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load packages: %w", err)
 	}
 
-	slog.Debug("NewTransformer", slog.String("oldFile", oldFile), slog.String("oldPkg", oldPkg), slog.String("oldPkgPath", oldPkgPath), slog.String("newPkgPath", newPkgPath), slog.String("newPkg", newPkg), slog.String("addPrefix", addPrefix), slog.String("deletePrefix", deletePrefix))
+	slog.Info("Loaded packages", slog.Int("count", len(allPkgs)))
 	return &Transformer{
-		fs:            fs,
-		oldFile:       oldFile,
-		oldPkg:        oldPkg,
-		oldPkgPath:    oldPkgPath,
-		newPkgPath:    newPkgPath,
-		newPkg:        newPkg,
-		addPrefix:     addPrefix,
-		deletePrefix:  deletePrefix,
-		workDir:       workDir,
-		doneIdent:     map[*ast.Ident]bool{},
-		targetSymbols: targetSymbols,
-		otherSymbols:  otherSymbols,
-	}
+		fs:           fs,
+		addPrefix:    addPrefix,
+		deletePrefix: deletePrefix,
+		workDir:      workDir,
+		newPkg:       newPkg,
+		doneIdent:    map[*ast.Ident]bool{},
+		doneFile:     map[string]*astWithOutFile{},
+		allPkgs:      allPkgs,
+	}, nil
 }
 
-func FilterDefSymbols(fs *token.FileSet, pkg *packages.Package, absTargetFile string) (map[string]bool, map[string]bool) {
+func (t *Transformer) filterDefSymbols(pkg *packages.Package, absTargetFile string) (map[string]bool, map[string]bool) {
 	targetSymbols := map[string]bool{}
 	otherSymbols := map[string]bool{}
 	// pkgの中からエクスポートされているシンボルを抽出
 	for _, d := range pkg.TypesInfo.Defs {
 		if d != nil && d.Exported() && d.Parent() == d.Pkg().Scope() {
-			if fs.Position(d.Pos()).Filename == absTargetFile {
+			if t.fs.Position(d.Pos()).Filename == absTargetFile {
 				targetSymbols[d.Name()] = true
 			} else {
 				otherSymbols[d.Name()] = true
@@ -85,7 +83,7 @@ func FilterDefSymbols(fs *token.FileSet, pkg *packages.Package, absTargetFile st
 	return targetSymbols, otherSymbols
 }
 
-func LoadPackages(fs *token.FileSet, absWorkDir string, buildFlags []string) ([]*packages.Package, error) {
+func loadPackages(fs *token.FileSet, absWorkDir string, buildFlags []string) ([]*packages.Package, error) {
 	slog.Debug("LoadPackages", slog.String("workDir", absWorkDir), slog.String("buildFlags", strings.Join(buildFlags, " ")))
 	cfg := &packages.Config{
 		Mode:       packages.LoadAllSyntax | packages.NeedForTest,
@@ -97,15 +95,39 @@ func LoadPackages(fs *token.FileSet, absWorkDir string, buildFlags []string) ([]
 	return packages.Load(cfg, "./...")
 }
 
-func FindPackageForFile(fs *token.FileSet, pkgs []*packages.Package, absTargetFile string) (*ast.File, *packages.Package, error) {
-	for _, pkg := range pkgs {
+func (t *Transformer) findPackageForFile(absTargetFile string) (*ast.File, *packages.Package, error) {
+	for _, pkg := range t.allPkgs {
 		for _, file := range pkg.Syntax {
-			if fs.Position(file.Pos()).Filename == absTargetFile {
-				return file, pkg, nil
+			if t.fs.Position(file.Pos()).Filename == absTargetFile {
+				if file != nil {
+					return file, pkg, nil
+				}
 			}
 		}
 	}
 	return nil, nil, fmt.Errorf("target file %s not found in packages", absTargetFile)
+}
+
+func (t *Transformer) Dump() error {
+	eg := &errgroup.Group{}
+
+	for _, v := range t.doneFile {
+		v := v
+		eg.Go(func() error {
+			if _, err := os.Stat(v.output); err != nil || v.modified {
+				// import pathを追加
+				if t.oldPkgPath != "" && !astutil.UsesImport(v.node, t.oldPkgPath) {
+					astutil.AddImport(t.fs, v.node, t.oldPkgPath)
+				}
+				if err := t.writeFile(v.node, v.output); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+	}
+	return eg.Wait()
 }
 
 // writeFile はフォーマットしてインポートを整理し、指定ファイルへ出力する
@@ -152,36 +174,75 @@ func (t *Transformer) writeFile(node *ast.File, output string) error {
 }
 
 // TransformSymbolsInTargetFile はターゲットファイル用
-func (t *Transformer) TransformSymbolsInTargetFile(node *ast.File, output string, typesInfo *types.Info) error {
-	modified, err := t.transformFile(node, typesInfo, true)
+func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error {
+	t.doneIdent = map[*ast.Ident]bool{}
+	node, pkg, err := t.findPackageForFile(target)
+	if err != nil {
+		return fmt.Errorf("failed to find package for file: %w", err)
+	}
+
+	t.oldPkg = node.Name.Name
+	t.oldPkgPath = pkg.PkgPath
+	t.targetSymbols, t.otherSymbols = t.filterDefSymbols(pkg, target)
+	if len(t.targetSymbols) == 0 && len(t.otherSymbols) == 0 {
+		return fmt.Errorf("no symbols found in target file: %s target:%d other:%d may be having syntax errors", target, len(t.targetSymbols), len(t.otherSymbols))
+	}
+
+	pos := strings.LastIndex(t.oldPkgPath, t.oldPkg)
+	if pos > 0 {
+		t.newPkgPath = t.oldPkgPath[:pos] + t.newPkg
+	}
+	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
+
+	modified, err := t.transformFile(node, pkg.TypesInfo, true)
 	if err != nil {
 		return err
 	}
 
-	DoneFile[t.fs.Position(node.Pos()).Filename] = true
-	if _, err := os.Stat(output); err != nil || modified {
-		// import pathを追加
-		if t.oldPkgPath != "" && !astutil.UsesImport(node, t.oldPkgPath) {
-			astutil.AddImport(t.fs, node, t.oldPkgPath)
-		}
-		return t.writeFile(node, output)
+	t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
+		node:     node,
+		output:   output,
+		modified: modified,
+		pkgName:  t.newPkg,
 	}
+
 	return nil
 }
 
 // TransformSymbolsInOtherFile は他ファイル用
-func (t *Transformer) TransformSymbolsInOtherFile(node *ast.File, output string, typesInfo *types.Info) error {
-	modified, err := t.transformFile(node, typesInfo, false)
+func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
+	if t.oldPkg == "" {
+		return fmt.Errorf("need to call TransformSymbolsInTargetFile first")
+	}
+
+	node, pkg, err := t.findPackageForFile(target)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("failed to find package for file: %s", target))
+		return nil
+	}
+
+	slog.Debug(fmt.Sprintf("load other symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
+	if node == nil {
+		return fmt.Errorf("failed to find package for file: %w", err)
+	}
+
+	modified, err := t.transformFile(node, pkg.TypesInfo, false)
 	if err != nil {
 		return err
 	}
+
 	if modified {
+		slog.Debug(fmt.Sprintf("modified file: %s", output))
 		// import pathを追加
 		if t.newPkgPath != "" && !astutil.UsesImport(node, t.newPkgPath) {
 			astutil.AddImport(t.fs, node, t.newPkgPath)
 		}
-
-		return t.writeFile(node, output)
+		t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
+			node:     node,
+			output:   output,
+			modified: modified,
+			pkgName:  node.Name.Name,
+		}
 	}
 	return nil
 }
@@ -210,6 +271,7 @@ func (t *Transformer) transformFile(file *ast.File, typesInfo *types.Info, isTar
 func (t *Transformer) addDoneList(e *ast.Ident) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	slog.Debug(fmt.Sprintf("Add DoneIdent %s", e.Name))
 	t.doneIdent[e] = true
 }
 
@@ -240,8 +302,10 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 		t.mu.Unlock()
 
 		if isTarget {
+			slog.Debug(fmt.Sprintf("Processing Ident %s in Target", n.Name))
 			return t.updateIdentInTargetFile(n, filePkg, typesInfo)
 		} else {
+			slog.Debug(fmt.Sprintf("Processing Ident %s in Other", n.Name))
 			return t.updateIdentInOtherFile(n, filePkg, typesInfo)
 		}
 
@@ -419,9 +483,9 @@ func (t *Transformer) updateExpr(node ast.Node, filePkg string, typesInfo *types
 func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 	if o, ok := typesInfo.Uses[e]; ok && o != nil && o.Pkg() != nil {
 		// 処理済みのファイルのパッケージは新しいパッケージ名を返す
-		if DoneFile[t.fs.Position(o.Pos()).Filename] {
-			fmt.Printf("usesPackageName: %s %s %s\n", e.Name, o.Pkg().Name(), t.newPkg)
-			return t.newPkg
+		d := t.doneFile[t.fs.Position(o.Pos()).Filename]
+		if d != nil {
+			return d.pkgName
 		}
 		return o.Pkg().Name()
 	}
@@ -429,6 +493,11 @@ func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) strin
 }
 
 func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
+	// 同じパッケージの接頭辞がついている場合は削除
+	if strings.HasPrefix(e.Name, t.newPkg+".") {
+		e.Name = strings.TrimPrefix(e.Name, t.newPkg+".")
+	}
+
 	// 変更前と同じパッケージのファイルで対象のファイルのシンボルではない場合
 	if t.otherSymbols[e.Name] && t.usesPackageName(e, typesInfo) == t.oldPkg {
 		// 変更前のパッケージと新しいパッケージが同じ場合(上書きなど)
@@ -449,7 +518,10 @@ func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, filePkg string, types
 	// 変更前のパッケージ
 	if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		// 変更前のファイルのシンボルを利用している
-		if filePkg != t.newPkg && t.usesPackageName(e, typesInfo) == t.oldPkg {
+		usePkg := t.usesPackageName(e, typesInfo)
+		// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
+
+		if filePkg != t.newPkg && usePkg == t.newPkg {
 			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 			return true
 		} else {
