@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/pyama86/pachanger/internal/pachanger"
@@ -206,6 +207,7 @@ func run() error {
 		// 他ファイルを並列で変換
 		g, ctx := errgroup.WithContext(ctx)
 
+		sem := make(chan struct{}, runtime.NumCPU()/2)
 		err = filepath.WalkDir(absWorkDir, func(path string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -222,7 +224,10 @@ func run() error {
 			}
 
 			g.Go(func() error {
-
+				sem <- struct{}{}
+				defer func() {
+					<-sem
+				}()
 				slog.DebugContext(ctx, "Processing other file", slog.String("file", path))
 				return transformer.TransformSymbolsInOtherFile(path, path)
 			})
