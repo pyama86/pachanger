@@ -515,6 +515,11 @@ func (t *Transformer) updateIdentInTargetFile(e *ast.Ident, filePkg string, type
 }
 
 func (t *Transformer) updateIdentInOtherFile(e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
+	// 同じパッケージの接頭辞がついている場合は削除
+	if strings.HasPrefix(e.Name, t.newPkg+".") && filePkg == t.newPkg {
+		e.Name = strings.TrimPrefix(e.Name, t.newPkg+".")
+	}
+
 	// 変更前のパッケージ
 	if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		// 変更前のファイルのシンボルを利用している
