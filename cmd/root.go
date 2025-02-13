@@ -68,7 +68,6 @@ func init() {
 	rootCmd.Flags().StringVar(&addPrefix, "add-prefix", "", "Add prefix to symbol name")
 	rootCmd.Flags().StringVar(&tagsFlag, "tags", "", "Build tags (e.g. 'test,integration')")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "debug mode")
-	rootCmd.AddCommand(versionCmd)
 }
 
 // determineOutputFile は、outputPath が空や相対パスの場合に正しい絶対パスを返し、

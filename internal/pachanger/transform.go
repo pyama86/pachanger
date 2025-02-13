@@ -119,7 +119,7 @@ func (t *Transformer) Dump() error {
 				if t.oldPkgPath != "" && !astutil.UsesImport(v.node, t.oldPkgPath) {
 					astutil.AddImport(t.fs, v.node, t.oldPkgPath)
 				}
-				if err := t.writeFile(v.node, v.output); err != nil {
+				if err := writeFile(t.fs, v.node, t.workDir, v.output); err != nil {
 					return err
 				}
 			}
@@ -128,49 +128,6 @@ func (t *Transformer) Dump() error {
 
 	}
 	return eg.Wait()
-}
-
-// writeFile はフォーマットしてインポートを整理し、指定ファイルへ出力する
-func (t *Transformer) writeFile(node *ast.File, output string) error {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %v", err)
-	}
-	defer func() {
-		err := os.Chdir(originalDir)
-		if err != nil {
-			fmt.Printf("failed to change directory to %s: %v\n", originalDir, err)
-		}
-	}()
-
-	dir := filepath.Dir(t.workDir)
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %v", dir, err)
-	}
-
-	var buf bytes.Buffer
-	config := &printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}
-	if err := config.Fprint(&buf, t.fs, node); err != nil {
-		return err
-	}
-
-	// SHOULD_BE_DELETED. が残っている場合は削除
-	tmp := strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", "")
-	buf = *bytes.NewBufferString(tmp)
-
-	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
-		Comments: true, TabWidth: 8, Fragment: true, FormatOnly: false, AllErrors: true,
-	})
-
-	if err != nil {
-		_ = os.WriteFile(output, buf.Bytes(), 0644)
-		return fmt.Errorf("failed to format/imports: %v", err)
-	}
-
-	if err := os.WriteFile(output, formatted, 0644); err != nil {
-		return fmt.Errorf("failed to write file %s: %v", output, err)
-	}
-	return nil
 }
 
 // TransformSymbolsInTargetFile はターゲットファイル用
@@ -572,4 +529,46 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		}
 	}
 	return false
+}
+
+func writeFile(fs *token.FileSet, node *ast.File, workDir, output string) error {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %v", err)
+	}
+	defer func() {
+		err := os.Chdir(originalDir)
+		if err != nil {
+			fmt.Printf("failed to change directory to %s: %v\n", originalDir, err)
+		}
+	}()
+
+	dir := filepath.Dir(workDir)
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("failed to change directory to %s: %v", dir, err)
+	}
+
+	var buf bytes.Buffer
+	config := &printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}
+	if err := config.Fprint(&buf, fs, node); err != nil {
+		return err
+	}
+
+	// SHOULD_BE_DELETED. が残っている場合は削除
+	tmp := strings.ReplaceAll(buf.String(), SHOULD_BE_DELETED+".", "")
+	buf = *bytes.NewBufferString(tmp)
+
+	formatted, err := imports.Process(output, buf.Bytes(), &imports.Options{
+		Comments: true, TabWidth: 8, Fragment: true, FormatOnly: false, AllErrors: true,
+	})
+
+	if err != nil {
+		_ = os.WriteFile(output, buf.Bytes(), 0644)
+		return fmt.Errorf("failed to format/imports: %v", err)
+	}
+
+	if err := os.WriteFile(output, formatted, 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %v", output, err)
+	}
+	return nil
 }
