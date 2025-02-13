@@ -55,6 +55,30 @@ func TestAddConstructorWithParamsStructRefactored(t *testing.T) {
 	ms := pachanger.NewMigrateStruct(workDir, targetPkg, suffix)
 	err = ms.Migrate(filepath.Join(workDir, "migrate/struct_test.go"))
 	assert.NoError(t, err)
+
+	expectedStructGoContent := `package migrate
+
+type MigrateStruct struct {
+	foo    string
+	bar    int
+	foobar *string
+}
+
+
+type MigrateStructParamsForTestMigrate struct {
+    Foo string
+    Bar int
+    Foobar *string
+}
+
+func NewMigrateStructForTestMigrate(params *MigrateStructParamsForTestMigrate) *MigrateStruct {
+    return &MigrateStruct{
+        Foo: params.Foo,
+        Bar: params.Bar,
+        Foobar: params.Foobar,
+    }
+}
+`
 	expectedStructTestGoContent := `package migrate_test
 
 import (
@@ -71,6 +95,11 @@ func TestAddConstructorWithParamsStructRefactored(t *testing.T) {
 	fmt.Println(m)
 }
 `
+
+	actualStructGoContent, err := os.ReadFile(filepath.Join(workDir, "migrate/struct.go"))
+	assert.NoError(t, err)
+	assert.Equal(t, expectedStructGoContent, string(actualStructGoContent))
+
 	actualStructTestGoContent, err := os.ReadFile(filepath.Join(workDir, "migrate/struct_test.go"))
 	assert.NoError(t, err)
 	assert.Equal(t, expectedStructTestGoContent, string(actualStructTestGoContent))
