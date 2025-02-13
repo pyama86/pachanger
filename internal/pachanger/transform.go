@@ -311,10 +311,20 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 		}
 
 	case *ast.SelectorExpr:
+		if nest, nestok := n.X.(*ast.SelectorExpr); nestok {
+			slog.Debug(fmt.Sprintf("Processing Nest SelectorExpr %s.%s in file:%s", nest.Sel.Name, n.Sel.Name, target))
+			t.addDoneList(nest.Sel)
+			t.addDoneList(n.Sel)
+			if t.updateExpr(target, nest, filePkg, typesInfo, isTarget) {
+				mod = true
+			}
+		}
+
 		if ident, ok := n.X.(*ast.Ident); ok {
 			// 無関係なパッケージは置き換えない
 			if ident.Name != t.oldPkg && ident.Name != t.newPkg {
-				slog.Debug(fmt.Sprintf("Skip %s.%s in synbol %v file:%s", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target))
+				slog.Debug(fmt.Sprintf("Skip Selector %s.%s in synbol %v file:%s", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target))
+
 				t.addDoneList(n.Sel)
 				return false
 			}
@@ -328,6 +338,14 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 					t.addDoneList(n.Sel)
 					return true
 				}
+
+				// 対処のファイルで古いパッケージ名を参照している場合
+				// 変数名がpackageと重複してるケースなので無視する
+				if ident.Name == t.oldPkg {
+					t.addDoneList(n.Sel)
+					return false
+				}
+
 			} else {
 				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Other file:%s", ident.Name, n.Sel.Name, target))
 				if t.targetSymbols[n.Sel.Name] {
@@ -505,7 +523,7 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 		if t.newPkg == t.oldPkg && filePkg == t.oldPkg {
 			return false
 		} else {
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
+			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
 			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
 		}
 		return true
