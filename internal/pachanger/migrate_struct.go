@@ -12,16 +12,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 	"unicode"
 
-	"golang.org/x/sys/unix"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // パッケージ情報を取得
 type StructDef struct {
 	pkg       string
-	typeDef   string
 	filePath  string
 	fields    map[string]string // フィールド名 -> 型
 	fieldList []string          // フィールドの順番を保持
@@ -46,6 +45,9 @@ func NewMigrateStruct(workDir, targetpkg, suffix string) *MigrateStruct {
 func (m *MigrateStruct) Migrate(testFile string) error {
 	StructDefs := m.FindStructDefinitions()
 	usedStructs, err := m.FindUsedStructs(testFile)
+	if err != nil {
+		return err
+	}
 
 	// コンストラクタとパラメータ構造体がない場合は作成
 	for structName, StructDef := range StructDefs {
@@ -280,7 +282,7 @@ func (m *MigrateStruct) AddConstructorWithParamsStructRefactored(
 			cleanFieldName = "*" + cleanFieldName
 		}
 
-		exportedName := strings.Title(cleanFieldName)
+		exportedName := cases.Title(language.English).String(cleanFieldName)
 		fieldsBuilder.WriteString(fmt.Sprintf("    %s %s\n", exportedName, StructDef.fields[fieldName]))
 	}
 
@@ -291,7 +293,7 @@ func (m *MigrateStruct) AddConstructorWithParamsStructRefactored(
 	constructorBuilder.WriteString(fmt.Sprintf("    return &%s{\n", nakedStructName))
 
 	for _, fieldName := range StructDef.fieldList {
-		exportedName := strings.Title(fieldName)
+		exportedName := cases.Title(language.English).String(fieldName)
 		constructorBuilder.WriteString(fmt.Sprintf("        %s: params.%s,\n", exportedName, exportedName))
 	}
 	constructorBuilder.WriteString("    }\n")
@@ -431,7 +433,7 @@ func (m *MigrateStruct) processCompositeLit(cl *ast.CompositeLit, StructDefs map
 		if kv, ok := el.(*ast.KeyValueExpr); ok {
 			if keyIdent, ok2 := kv.Key.(*ast.Ident); ok2 {
 				// フィールド名を Title 化 (repo -> Repo)
-				newKey := strings.Title(keyIdent.Name)
+				newKey := cases.Title(language.English).String(keyIdent.Name)
 				newElts = append(newElts, &ast.KeyValueExpr{
 					Key:   &ast.Ident{Name: newKey},
 					Value: kv.Value,
@@ -468,29 +470,4 @@ func (m *MigrateStruct) processCompositeLit(cl *ast.CompositeLit, StructDefs map
 	}
 
 	return call
-}
-
-func lockFileWithRetry(filePath string, retryInterval time.Duration) (*os.File, error) {
-	var file *os.File
-	var err error
-
-	for {
-		file, err = os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, 0666)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open file: %w", err)
-		}
-		err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return file, nil
-		}
-		time.Sleep(retryInterval)
-	}
-}
-
-func unlockFile(file *os.File) error {
-	err := unix.Flock(int(file.Fd()), unix.LOCK_UN)
-	if err != nil {
-		return fmt.Errorf("failed to release lock: %w", err)
-	}
-	return file.Close()
 }
