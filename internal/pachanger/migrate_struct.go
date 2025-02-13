@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -33,16 +34,25 @@ type MigrateStruct struct {
 	suffix    string
 }
 
-func NewMigrateStruct(workDir, targetpkg, suffix string) *MigrateStruct {
+func NewMigrateStruct(workDir, targetpkg, suffix string) (*MigrateStruct, error) {
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &MigrateStruct{
-		workDir:   workDir,
+		workDir:   absWorkDir,
 		targetpkg: targetpkg,
 		suffix:    suffix,
 		fs:        token.NewFileSet(),
-	}
+	}, nil
 }
 
 func (m *MigrateStruct) Migrate(testFile string) error {
+	if !filepath.IsAbs(testFile) {
+		testFile = path.Join(m.workDir, testFile)
+	}
+
 	StructDefs := m.FindStructDefinitions()
 	usedStructs, err := m.FindUsedStructs(testFile)
 	if err != nil {

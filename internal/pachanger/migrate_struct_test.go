@@ -52,7 +52,9 @@ func TestAddConstructorWithParamsStructRefactored(t *testing.T) {
 	err = os.WriteFile(filepath.Join(workDir, "migrate/struct_test.go"), []byte(structTestGoContent), 0644)
 	assert.NoError(t, err)
 
-	ms := pachanger.NewMigrateStruct(workDir, targetPkg, suffix)
+	ms, err := pachanger.NewMigrateStruct(workDir, targetPkg, suffix)
+	assert.NoError(t, err)
+
 	err = ms.Migrate(filepath.Join(workDir, "migrate/struct_test.go"))
 	assert.NoError(t, err)
 

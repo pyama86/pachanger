@@ -28,7 +28,11 @@ var migrateStructCmd = &cobra.Command{
 			suffix = "ForTest"
 		}
 
-		ms := pachanger.NewMigrateStruct(workDir, targetPkg, suffix)
+		ms, err := pachanger.NewMigrateStruct(workDir, targetPkg, suffix)
+		if err != nil {
+			slog.Error("Failed to create MigrateStruct", slog.Any("error", err))
+			os.Exit(1)
+		}
 		if err := ms.Migrate(testFile); err != nil {
 			slog.Error("Failed to migrate struct", slog.String("test_file", testFile), slog.Any("error", err))
 			os.Exit(1)
