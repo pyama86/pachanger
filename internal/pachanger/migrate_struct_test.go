@@ -92,7 +92,7 @@ import (
 
 func TestAddConstructorWithParamsStructRefactored(t *testing.T) {
 	f := "abc"
-	m := migrate.NewMigrateStructForTestMigrate(migrate.MigrateStructParamsForTestMigrate{Foo: "foo", Bar: 1, Foobar: &f})
+	m := migrate.NewMigrateStructForTestMigrate(&migrate.MigrateStructParamsForTestMigrate{Foo: "foo", Bar: 1, Foobar: &f})
 
 	fmt.Println(m)
 }

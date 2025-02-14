@@ -471,7 +471,7 @@ func (m *MigrateStruct) processCompositeLit(cl *ast.CompositeLit, StructDefs map
 		Args: []ast.Expr{
 			&ast.CompositeLit{
 				Type: &ast.SelectorExpr{
-					X:   &ast.Ident{Name: StructDef.pkg}, // "handler"
+					X:   &ast.Ident{Name: "&" + StructDef.pkg}, // "handler"
 					Sel: &ast.Ident{Name: paramsStructName},
 				},
 				Elts: newElts, // 大文字化した KeyValue を詰める
