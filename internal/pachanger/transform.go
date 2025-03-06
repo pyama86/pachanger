@@ -153,7 +153,6 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 		}
 		oldPkgDir := t.oldPkgPath[:pos]
 		repoPath := strings.Index(outputDir, oldPkgDir)
-		fmt.Println("outputDir", outputDir, "oldPkgDir", oldPkgDir, "repoPath", repoPath)
 		if repoPath > 0 {
 			t.newPkgPath = outputDir[repoPath:]
 		} else {
@@ -326,10 +325,17 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 						// もとのパッケージのファイルが
 						// 変更前のパッケージ名でアクセスしている
 						// もしくは新旧関係ないパッケージのファイルが
-						// 変更前か変更後のパッケージ名でアクセスしている
+						// 変更前のパッケージ名でアクセスしている
 					} else if (t.oldPkg == filePkg || t.newPkg != filePkg) && ident.Name == t.oldPkg {
+						beforeIdent := ident.Name
+						beforeSel := n.Sel.Name
 						ident.Name = t.newPkg
-						slog.Debug(fmt.Sprintf("Add DoneIdent %s in Other file:%s", n.Sel.Name, target))
+						if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(n.Sel.Name) {
+							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(n.Sel.Name, t.deletePrefix))
+						} else {
+							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, n.Sel.Name)
+						}
+						slog.Debug(fmt.Sprintf("Update %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
 						return true
 					}
 				} else {
@@ -529,13 +535,10 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		e.Name = strings.TrimPrefix(e.Name, t.oldPkg+".")
 	}
 
-	// 変更前のパッケージ
-	if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
-		// 変更前のファイルのシンボルを利用している
-		usePkg := t.usesPackageName(e, typesInfo)
-		// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
-
-		if filePkg != t.newPkg && usePkg == t.newPkg {
+	if t.targetSymbols[e.Name] {
+		// 変更前のパッケージのファイル
+		if filePkg == t.oldPkg {
+			// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
 			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
 				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
 				e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
@@ -545,16 +548,21 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 			}
 			return true
 		} else {
+			// 変更前のパッケージではないファイル
 			before := e.Name
-			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-				e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
-			} else {
-				e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
-			}
-			if before != e.Name {
-				return true
+			usePkg := t.usesPackageName(e, typesInfo)
+			if usePkg == t.oldPkg {
+				if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
+					e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+				} else {
+					e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
+				}
+				if before != e.Name {
+					return true
+				}
 			}
 		}
+
 	}
 	return false
 }
