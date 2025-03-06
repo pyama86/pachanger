@@ -536,8 +536,9 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 	}
 
 	if t.targetSymbols[e.Name] {
+		usePkg := t.usesPackageName(e, typesInfo)
 		// 変更前のパッケージのファイル
-		if filePkg == t.oldPkg {
+		if filePkg == t.oldPkg && usePkg != "" {
 			// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
 			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
 				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
@@ -550,7 +551,6 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		} else {
 			// 変更前のパッケージではないファイル
 			before := e.Name
-			usePkg := t.usesPackageName(e, typesInfo)
 			if usePkg == t.oldPkg {
 				if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
 					e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
