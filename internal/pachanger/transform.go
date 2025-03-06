@@ -156,7 +156,7 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 		if repoPath > 0 {
 			t.newPkgPath = outputDir[repoPath:]
 		} else {
-			return fmt.Errorf("failed to find new package path: %s", outputDir)
+			return fmt.Errorf("failed to find new package path: %s, oldPkgDir: %s", outputDir, oldPkgDir)
 		}
 	}
 	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
