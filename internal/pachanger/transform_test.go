@@ -54,6 +54,7 @@ func TestTransformTargetFile(t *testing.T) {
 }
 
 func TestTransformOtherFile(t *testing.T) {
+	t.Setenv("PACHANGER_FORCE_OUTPUT_CHANGE", "true")
 	workDir, err := os.Getwd()
 	assert.NoError(t, err)
 	workDir = filepath.Join(workDir, "testdata")

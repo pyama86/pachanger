@@ -148,8 +148,12 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 	pos := strings.LastIndex(t.oldPkgPath, t.oldPkg)
 	if pos > 0 {
 		outputDir := filepath.Dir(output)
+		if os.Getenv("PACHANGER_FORCE_OUTPUT_CHANGE") != "" {
+			outputDir = filepath.Join(outputDir[:(strings.LastIndex(outputDir, "output"))], t.newPkg)
+		}
 		oldPkgDir := t.oldPkgPath[:pos]
 		repoPath := strings.Index(outputDir, oldPkgDir)
+		fmt.Println("outputDir", outputDir, "oldPkgDir", oldPkgDir, "repoPath", repoPath)
 		if repoPath > 0 {
 			t.newPkgPath = outputDir[repoPath:]
 		} else {
