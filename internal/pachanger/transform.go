@@ -147,7 +147,14 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 
 	pos := strings.LastIndex(t.oldPkgPath, t.oldPkg)
 	if pos > 0 {
-		t.newPkgPath = t.oldPkgPath[:pos] + t.newPkg
+		outputDir := filepath.Dir(output)
+		oldPkgDir := t.oldPkgPath[:pos]
+		repoPath := strings.Index(outputDir, oldPkgDir)
+		if repoPath > 0 {
+			t.newPkgPath = outputDir[repoPath:]
+		} else {
+			return fmt.Errorf("failed to find new package path: %s", outputDir)
+		}
 	}
 	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
 
