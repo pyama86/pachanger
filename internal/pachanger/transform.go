@@ -481,11 +481,19 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 			return false
 		} else {
 			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
-			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
+				e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
+			} else {
+				e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
+			}
 		}
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
-		e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+		if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
+			e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+		} else {
+			e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
+		}
 		return true
 	}
 	return false
@@ -517,12 +525,21 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
 
 		if filePkg != t.newPkg && usePkg == t.newPkg {
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
-			e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
+				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
+				e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			} else {
+				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, e.Name), target))
+				e.Name = fmt.Sprintf("%s.%s", t.newPkg, e.Name)
+			}
 			return true
 		} else {
 			before := e.Name
-			e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
+				e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			} else {
+				e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
+			}
 			if before != e.Name {
 				return true
 			}
