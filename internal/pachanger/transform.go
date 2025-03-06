@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -147,16 +148,11 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 
 	pos := strings.LastIndex(t.oldPkgPath, t.oldPkg)
 	if pos > 0 {
-		outputDir := filepath.Dir(output)
-		if os.Getenv("PACHANGER_FORCE_OUTPUT_CHANGE") != "" {
-			outputDir = filepath.Join(outputDir[:(strings.LastIndex(outputDir, "output"))], t.newPkg)
-		}
-		oldPkgDir := t.oldPkgPath[:pos]
-		repoPath := strings.Index(outputDir, oldPkgDir)
-		if repoPath > 0 {
-			t.newPkgPath = outputDir[repoPath:]
+		// ネストの場合
+		if strings.Index(output, fmt.Sprintf("%s/%s", t.oldPkg, t.newPkg)) > 0 {
+			t.newPkgPath = path.Join(t.oldPkgPath[:pos], t.oldPkg, t.newPkg)
 		} else {
-			return fmt.Errorf("failed to find new package path: %s, oldPkgDir: %s", outputDir, oldPkgDir)
+			t.newPkgPath = t.oldPkgPath[:pos] + t.newPkg
 		}
 	}
 	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
