@@ -254,6 +254,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 				t.addDoneList(name)
 			}
 		}
+
 		if t.updateExpr(target, n.Type, filePkg, typesInfo, isTarget) {
 			return true
 		}
@@ -302,7 +303,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 					return true
 				}
 
-				// 対処のファイルで古いパッケージ名を参照している場合
+				// 対象のファイルで古いパッケージ名を参照している場合
 				// 変数名がpackageと重複してるケースなので無視する
 				if ident.Name == t.oldPkg {
 					t.addDoneList(n.Sel)
@@ -480,7 +481,17 @@ func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) strin
 	return ""
 }
 
+func (t *Transformer) isLocalDecl(e *ast.Ident, typesInfo *types.Info) bool {
+	if obj := typesInfo.ObjectOf(e); obj != nil && obj.Parent() != obj.Pkg().Scope() {
+		// この識別子はローカル定義なので、変換対象外とする
+		return true
+	}
+
+	return false
+}
+
 func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
+
 	// 同じパッケージの接頭辞がついている場合は削除
 	if strings.HasPrefix(e.Name, t.newPkg+".") {
 		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, strings.TrimPrefix(e.Name, t.newPkg+"."), target))
@@ -513,6 +524,10 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 }
 
 func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
+	usePkg := t.usesPackageName(e, typesInfo)
+	if t.isLocalDecl(e, typesInfo) && usePkg == filePkg {
+		return false
+	}
 
 	// ファイルと同じパッケージの接頭辞がついている場合は削除
 	if strings.HasPrefix(e.Name, t.newPkg+".") && filePkg == t.newPkg {
@@ -532,7 +547,6 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 	}
 
 	if t.targetSymbols[e.Name] {
-		usePkg := t.usesPackageName(e, typesInfo)
 		// 変更前のパッケージのファイル
 		if filePkg == t.oldPkg && usePkg != "" {
 			// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合

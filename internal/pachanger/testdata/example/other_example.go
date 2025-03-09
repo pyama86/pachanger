@@ -17,9 +17,10 @@ func (a AnotherGenericBox[T]) Summarize() {
 
 // SomeExample 構造体
 type SomeExample struct {
-	ID      MyInt
-	Note    string
-	example OtherExample
+	ID       MyInt
+	Note     string
+	example  OtherExample
+	example2 OtherExample
 	OtherExample
 }
 
@@ -51,4 +52,20 @@ type GenericBox[T any] struct {
 
 func (g GenericBox[T]) Print() {
 	fmt.Printf("GenericBox: %+v\n", g.Value)
+}
+
+// 関数内で同じ名前の構造体を定義したケース
+func SameNameStruct() {
+	type Example struct {
+		ID   MyInt
+		Name string
+		E    Example
+	}
+
+	type SameNameStruct struct {
+		Example Example
+	}
+
+	var s SameNameStruct
+	fmt.Println(s)
 }
