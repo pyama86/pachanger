@@ -43,7 +43,8 @@ type Transformer struct {
 	otherSymbols  map[string]bool
 	doneFile      map[string]*astWithOutFile
 	allPkgs       []*packages.Package
-	mu            sync.Mutex
+	identMutex    sync.Mutex
+	fileMutex     sync.Mutex
 }
 
 // NewTransformer は Transformer を生成
@@ -66,6 +67,18 @@ func NewTransformer(workDir, newPkg, addPrefix, deletePrefix string, buildFlags 
 		doneFile:     map[string]*astWithOutFile{},
 		allPkgs:      allPkgs,
 	}, nil
+}
+
+func (t *Transformer) getDoneFile(key string) *astWithOutFile {
+	t.fileMutex.Lock()
+	defer t.fileMutex.Unlock()
+	return t.doneFile[key]
+}
+
+func (t *Transformer) setDoneFile(key string, value *astWithOutFile) {
+	t.fileMutex.Lock()
+	defer t.fileMutex.Unlock()
+	t.doneFile[key] = value
 }
 
 func (t *Transformer) filterDefSymbols(pkg *packages.Package, absTargetFile string) (map[string]bool, map[string]bool) {
@@ -163,14 +176,12 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 		return err
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
+	t.setDoneFile(t.fs.Position(node.Pos()).Filename, &astWithOutFile{
 		node:     node,
 		output:   output,
 		modified: modified,
 		pkgName:  t.newPkg,
-	}
+	})
 
 	return nil
 }
@@ -204,14 +215,12 @@ func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
 		if t.newPkgPath != "" && !astutil.UsesImport(node, t.newPkgPath) {
 			astutil.AddImport(t.fs, node, t.newPkgPath)
 		}
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
+		t.setDoneFile(t.fs.Position(node.Pos()).Filename, &astWithOutFile{
 			node:     node,
 			output:   output,
 			modified: modified,
 			pkgName:  node.Name.Name,
-		}
+		})
 	}
 	return nil
 }
@@ -238,8 +247,8 @@ func (t *Transformer) transformFile(target string, file *ast.File, typesInfo *ty
 	return modified, nil
 }
 func (t *Transformer) addDoneList(e *ast.Ident) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.identMutex.Lock()
+	defer t.identMutex.Unlock()
 	slog.Debug(fmt.Sprintf("Add DoneIdent %s", e.Name))
 	t.doneIdent[e] = true
 }
@@ -263,8 +272,8 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 			return true
 		}
 	case *ast.Ident:
-		t.mu.Lock()
-		defer t.mu.Unlock()
+		t.identMutex.Lock()
+		defer t.identMutex.Unlock()
 		if t.doneIdent[n] {
 			slog.Debug(fmt.Sprintf("Skip Ident %s in synbol %v file:%s", n.Name, t.targetSymbols[n.Name], target))
 			return false
@@ -476,9 +485,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 	if o, ok := typesInfo.Uses[e]; ok && o != nil && o.Pkg() != nil {
 		// 処理済みのファイルのパッケージは新しいパッケージ名を返す
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		d := t.doneFile[t.fs.Position(o.Pos()).Filename]
+		d := t.getDoneFile(t.fs.Position(o.Pos()).Filename)
 		if d != nil {
 			return d.pkgName
 		}
