@@ -204,6 +204,13 @@ func isUnexported(name string) bool {
 	return !unicode.IsUpper(r)
 }
 
+func capitalizeFirst(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMap map[token.Pos]ast.Node, usedOutside map[types.Object]bool) {
 	if processedObjects[obj] {
 		return
@@ -211,7 +218,7 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 	processedObjects[obj] = true
 
 	pos := g.fs.Position(obj.Pos())
-	exportedName := strings.ToTitle(obj.Name())
+	exportedName := capitalizeFirst(obj.Name())
 	fmt.Printf("gopls rename -w %s:%d:%d %s;\n", pos.Filename, pos.Line, pos.Column, exportedName)
 
 	if decl, ok := declMap[obj.Pos()]; ok {
