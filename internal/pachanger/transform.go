@@ -163,6 +163,8 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 		return err
 	}
 
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
 		node:     node,
 		output:   output,
@@ -202,6 +204,8 @@ func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
 		if t.newPkgPath != "" && !astutil.UsesImport(node, t.newPkgPath) {
 			astutil.AddImport(t.fs, node, t.newPkgPath)
 		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
 		t.doneFile[t.fs.Position(node.Pos()).Filename] = &astWithOutFile{
 			node:     node,
 			output:   output,
@@ -472,6 +476,8 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 func (t *Transformer) usesPackageName(e *ast.Ident, typesInfo *types.Info) string {
 	if o, ok := typesInfo.Uses[e]; ok && o != nil && o.Pkg() != nil {
 		// 処理済みのファイルのパッケージは新しいパッケージ名を返す
+		t.mu.Lock()
+		defer t.mu.Unlock()
 		d := t.doneFile[t.fs.Position(o.Pos()).Filename]
 		if d != nil {
 			return d.pkgName
