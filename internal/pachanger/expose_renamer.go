@@ -117,6 +117,9 @@ func (g *ExposeRenamer) Generate() error {
 		}
 		obj := info.Uses[ident]
 		if obj == nil {
+			obj = info.Defs[ident]
+		}
+		if obj == nil {
 			return true
 		}
 
@@ -219,6 +222,9 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 
 	pos := g.fs.Position(obj.Pos())
 	exportedName := capitalizeFirst(obj.Name())
+	if exportedName == obj.Name() {
+		return
+	}
 	fmt.Printf("gopls rename -w %s:%d:%d %s;\n", pos.Filename, pos.Line, pos.Column, exportedName)
 
 	if decl, ok := declMap[obj.Pos()]; ok {
