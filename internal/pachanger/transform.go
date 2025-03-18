@@ -504,12 +504,8 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 		if t.newPkg == t.oldPkg && filePkg == t.oldPkg {
 			return false
 		} else {
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
-			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-				e.Name = fmt.Sprintf("%s.%s", t.oldPkg, strings.TrimPrefix(e.Name, t.deletePrefix))
-			} else {
-				e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
-			}
+			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, e.Name), target))
+			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
 		}
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
