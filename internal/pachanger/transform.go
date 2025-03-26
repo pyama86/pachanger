@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -143,6 +144,27 @@ func (t *Transformer) Dump() error {
 	}
 	return eg.Wait()
 }
+func findGoModDir(startDir string) (string, error) {
+	currentDir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		goModPath := filepath.Join(currentDir, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			return currentDir, nil
+		}
+
+		parentDir := filepath.Dir(currentDir)
+		if parentDir == currentDir {
+			break
+		}
+		currentDir = parentDir
+	}
+
+	return "", fmt.Errorf("go.mod not found in any parent directory of %s", startDir)
+}
 
 // TransformSymbolsInTargetFile はターゲットファイル用
 func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error {
@@ -159,15 +181,21 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 		return fmt.Errorf("no symbols found in target file: %s target:%d other:%d may be having syntax errors", target, len(t.targetSymbols), len(t.otherSymbols))
 	}
 
-	pos := strings.LastIndex(t.oldPkgPath, t.oldPkg)
-	if pos > 0 {
-		// ネストの場合
-		if strings.Index(output, fmt.Sprintf("%s/%s", t.oldPkg, t.newPkg)) > 0 {
-			t.newPkgPath = path.Join(t.oldPkgPath[:pos], t.oldPkg, t.newPkg)
-		} else {
-			t.newPkgPath = t.oldPkgPath[:pos] + t.newPkg
-		}
+	outputDir := filepath.Dir(output)
+	goDir, err := findGoModDir(t.workDir)
+	if err != nil {
+		return fmt.Errorf("failed to find go.mod directory: %w", err)
 	}
+	gomodStr, err := os.ReadFile(filepath.Join(goDir, "go.mod"))
+	if err != nil {
+		return fmt.Errorf("failed to read go.mod: %w", err)
+	}
+	gomod, err := modfile.Parse("go.mod", gomodStr, nil)
+	if err != nil {
+		return fmt.Errorf("failed to parse go.mod: %w", err)
+	}
+	t.newPkgPath = path.Join(gomod.Module.Mod.Path, outputDir[len(goDir):])
+
 	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
 
 	base := filepath.Base(target)
