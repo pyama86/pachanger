@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.0.22](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.0.22) - 2025-03-26
+
 ## [v0.0.22](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.0.22) - 2025-03-18
 
 ## [v0.0.22](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.0.22) - 2025-03-18
