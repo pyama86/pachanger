@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.1.1](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.1.1) - 2025-03-27
+- 構造体を移行できるようにした by @pyama86 in https://github.com/pyama86/pachanger/pull/39
+- Bump golang.org/x/sync from 0.10.0 to 0.11.0 by @dependabot in https://github.com/pyama86/pachanger/pull/37
+- fix lint by @pyama86 in https://github.com/pyama86/pachanger/pull/41
+- Bump golang.org/x/tools from 0.29.0 to 0.30.0 by @dependabot in https://github.com/pyama86/pachanger/pull/44
+- Bump github.com/spf13/cobra from 1.8.1 to 1.9.1 by @dependabot in https://github.com/pyama86/pachanger/pull/45
+- 必要なメソッドや変数をexposeする by @pyama86 in https://github.com/pyama86/pachanger/pull/49
+- Bump golang.org/x/sync from 0.11.0 to 0.12.0 by @dependabot in https://github.com/pyama86/pachanger/pull/52
+- Bump golang.org/x/tools from 0.30.0 to 0.31.0 by @dependabot in https://github.com/pyama86/pachanger/pull/50
+- Bump golang.org/x/text from 0.22.0 to 0.23.0 by @dependabot in https://github.com/pyama86/pachanger/pull/51
+
 ## [v0.0.22](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.0.22) - 2025-03-26
 
 ## [v0.0.22](https://github.com/pyama86/pachanger/compare/v0.1.0...v0.0.22) - 2025-03-18
