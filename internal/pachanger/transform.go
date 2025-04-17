@@ -490,18 +490,22 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 			})
 		}
 	case *ast.IndexExpr: // 単一のジェネリック型
+		// ジェネリック型の型名（X）を処理
 		if t.updateExpr(target, n.X, filePkg, typesInfo, isTarget) {
 			mod = true
 		}
+		// 型パラメータ（Index）も処理する
 		if t.updateExpr(target, n.Index, filePkg, typesInfo, isTarget) {
 			mod = true
 		}
 	case *ast.IndexListExpr: // 複数のジェネリック型
+		// ジェネリック型の型名（X）を処理
 		if t.updateExpr(target, n.X, filePkg, typesInfo, isTarget) {
 			mod = true
 		}
-		for _, idx := range n.Indices {
-			if t.updateExpr(target, idx, filePkg, typesInfo, isTarget) {
+		// 型パラメータ（Indices）も処理する
+		for _, index := range n.Indices {
+			if t.updateExpr(target, index, filePkg, typesInfo, isTarget) {
 				mod = true
 			}
 		}

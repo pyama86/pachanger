@@ -3,8 +3,8 @@ package someother
 import (
 	"fmt"
 
-	"github.com/pyama86/pachanger/internal/pachanger/testdata/changed_example"
 	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/output/changed_example"
 )
 
 // exampleパッケージにある定数を参照（example.MyConst, example.MyConst2など）

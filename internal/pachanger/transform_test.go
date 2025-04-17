@@ -36,7 +36,31 @@ func TestTransformTargetFile(t *testing.T) {
 
 	inputPath := filepath.Join(workDir, "example/target_ok.go")
 	expectedPath := filepath.Join(workDir, "expected/target_ok.go")
-	outputPath := filepath.Join(workDir, "output/target_ok.go")
+	outputPath := filepath.Join(workDir, "output/changed_example/target_ok.go")
+	os.Remove(outputPath)
+
+	transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
+	assert.NoError(t, err)
+
+	err = transformer.TransformSymbolsInTargetFile(inputPath, outputPath)
+	assert.NoError(t, err)
+
+	err = transformer.Dump()
+	assert.NoError(t, err)
+
+	diff, err := compareFiles(outputPath, expectedPath)
+	assert.NoError(t, err)
+	assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+}
+
+func TestTransformGenericType(t *testing.T) {
+	workDir, err := os.Getwd()
+	assert.NoError(t, err)
+	workDir = filepath.Join(workDir, "testdata")
+
+	inputPath := filepath.Join(workDir, "example/generic_test.go")
+	expectedPath := filepath.Join(workDir, "expected/generic_test.go")
+	outputPath := filepath.Join(workDir, "output/changed_example/generic_test.go")
 	os.Remove(outputPath)
 
 	transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
@@ -59,13 +83,13 @@ func TestTransformOtherFile(t *testing.T) {
 	workDir = filepath.Join(workDir, "testdata")
 
 	targetPath := filepath.Join(workDir, "example/target_ok.go")
-	targetOutputPath := filepath.Join(workDir, "output/target_ok.go")
+	targetOutputPath := filepath.Join(workDir, "output/changed_example/target_ok.go")
 
 	// 同じパッケージの他のファイルが変換されるパターン
 	t.Run("変更前のパッケージと同じパッケージだが別のファイルを処理したケース", func(t *testing.T) {
 		inputPath := filepath.Join(workDir, "example/other_example.go")
 		expectedPath := filepath.Join(workDir, "expected/other_example.go")
-		outputPath := filepath.Join(workDir, "output/other_expample.go")
+		outputPath := filepath.Join(workDir, "output/example/other_expample.go")
 		os.Remove(outputPath)
 
 		transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
@@ -73,6 +97,7 @@ func TestTransformOtherFile(t *testing.T) {
 
 		err = transformer.TransformSymbolsInTargetFile(targetPath, targetOutputPath)
 		assert.NoError(t, err)
+
 		err = transformer.TransformSymbolsInOtherFile(inputPath, outputPath)
 		assert.NoError(t, err)
 		err = transformer.Dump()
@@ -88,7 +113,7 @@ func TestTransformOtherFile(t *testing.T) {
 	t.Run("変更もとのパッケージと関係ないパッケージを処理したケース", func(t *testing.T) {
 		inputPath := filepath.Join(workDir, "someother/other_package_ok.go")
 		expectedPath := filepath.Join(workDir, "expected/other_package_ok.go")
-		outputPath := filepath.Join(workDir, "output/other_package_ok.go")
+		outputPath := filepath.Join(workDir, "output/someother/other_package_ok.go")
 		os.Remove(outputPath)
 
 		transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
@@ -109,7 +134,7 @@ func TestTransformOtherFile(t *testing.T) {
 	t.Run("変更後のパッケージと同じパッケージで他のファイルを処理するケース", func(t *testing.T) {
 		inputPath := filepath.Join(workDir, "changed_example/is_package_renamed.go")
 		expectedPath := filepath.Join(workDir, "expected/is_package_renamed.go")
-		outputPath := filepath.Join(workDir, "output/is_package_renamed.go")
+		outputPath := filepath.Join(workDir, "output/changed_example/is_package_renamed.go")
 		os.Remove(outputPath)
 
 		transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
