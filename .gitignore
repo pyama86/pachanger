@@ -28,5 +28,8 @@ bin/pachanger
 
 internal/pachanger/testdata/output/*
 !internal/pachanger/testdata/output/.gitkeep
+!internal/pachanger/testdata/output/example/.gitkeep
+!internal/pachanger/testdata/output/changed_example/.gitkeep
+!internal/pachanger/testdata/output/someother/.gitkeep
 internal/pachanger/testdata/migrate/struct.go
 internal/pachanger/testdata/migrate/struct_test.go
