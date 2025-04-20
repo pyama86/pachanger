@@ -610,7 +610,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 				e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
 			} else {
 				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, e.Name), target))
-				e.Name = fmt.Sprintf("%s.%s", t.newPkg, e.Name)
+				e.Name = fmt.Sprintf("%s.%s", t.newPkg, fmt.Sprintf("%s%s", t.addPrefix, e.Name))
 			}
 			return true
 		} else {
