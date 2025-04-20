@@ -10,6 +10,7 @@ import (
 
 var (
 	targetFile string
+	execute    bool
 )
 
 // expose サブコマンド：未エクスポートなシンボルを外部に露出させるためのリネーム生成を行います。
@@ -22,7 +23,7 @@ var exposeCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		renamer, err := pachanger.NewExposeRenamer(workDir, targetFile, tagsFlag)
+		renamer, err := pachanger.NewExposeRenamer(workDir, targetFile, tagsFlag, execute)
 		if err != nil {
 			slog.Error("Failed to initialize ExposeRenamer", slog.Any("error", err))
 			os.Exit(1)
@@ -48,4 +49,5 @@ func init() {
 	exposeCmd.Flags().StringVar(&tagsFlag, "tags", "", "Specify build tags (e.g., 'test,integration')")
 	exposeCmd.Flags().StringVar(&targetFile, "file", "", "Path to the target Go file (required)")
 	exposeCmd.Flags().StringVar(&workDir, "workdir", cdir, "Working directory (default: current directory)")
+	exposeCmd.Flags().BoolVar(&execute, "execute", false, "Execute the renaming (default: false)")
 }

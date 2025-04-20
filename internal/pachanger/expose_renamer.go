@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -21,9 +22,10 @@ type ExposeRenamer struct {
 	fs         *token.FileSet
 	targetFile string
 	buildFlags []string
+	execute    bool
 }
 
-func NewExposeRenamer(workDir, targetFile, tagsFlag string) (*ExposeRenamer, error) {
+func NewExposeRenamer(workDir, targetFile, tagsFlag string, execute bool) (*ExposeRenamer, error) {
 	fs := token.NewFileSet()
 	absWorkDir, err := filepath.Abs(workDir)
 	if err != nil {
@@ -43,6 +45,7 @@ func NewExposeRenamer(workDir, targetFile, tagsFlag string) (*ExposeRenamer, err
 		fs:         fs,
 		targetFile: targetFile,
 		buildFlags: buildFlags,
+		execute:    execute,
 	}, nil
 }
 
@@ -225,7 +228,16 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 	if exportedName == obj.Name() {
 		return
 	}
-	fmt.Printf("gopls rename -w %s:%d:%d %s;\n", pos.Filename, pos.Line, pos.Column, exportedName)
+	goplsCmd := fmt.Sprintf("gopls rename -w %s:%d:%d %s", pos.Filename, pos.Line, pos.Column, exportedName)
+	slog.Info("gopls rename command", "command", goplsCmd)
+	if g.execute {
+		// 実行する場合は、gopls コマンドを実行
+		_, err := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName).Output()
+		if err != nil {
+			slog.Error("gopls rename command failed", "error", err)
+			return
+		}
+	}
 
 	if decl, ok := declMap[obj.Pos()]; ok {
 		ast.Inspect(decl, func(n ast.Node) bool {
