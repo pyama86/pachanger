@@ -236,7 +236,7 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 		cmd := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName)
 		env := os.Environ()
 		if g.buildFlags != nil {
-			env = append(env, fmt.Sprintf("GOFLAGS=%s", strings.Join(g.buildFlags, " ")))
+			env = append(env, fmt.Sprintf("GOFLAGS=%s", strings.Join(g.buildFlags, "=")))
 		}
 		cmd.Env = env
 
