@@ -1,9 +1,9 @@
-package example
+package changed_example
 
 import (
 	"fmt"
 
-	"github.com/pyama86/pachanger/internal/pachanger/testdata/output/changed_example"
+	"github.com/pyama86/pachanger/internal/pachanger/testdata/example"
 )
 
 // 追加のジェネリクス型（ネストで利用される）
@@ -18,12 +18,12 @@ func (a AnotherGenericBox[T]) Summarize() {
 }
 
 // SomeExample 構造体
-type SomeExample struct {
-	ID       changed_example.MyInt
+type Example struct {
+	ID       example.MyInt
 	Note     string
-	example  changed_example.OtherExample
-	example2 changed_example.OtherExample
-	changed_example.OtherExample
+	example  example.OtherExample
+	example2 example.OtherExample
+	example.OtherExample
 }
 
 // iotaで列挙的定数
@@ -59,20 +59,20 @@ func (g GenericBox[T]) Print() {
 // 関数内で同じ名前の構造体を定義したケース
 func SameNameStruct() {
 	type Example struct {
-		ID   changed_example.MyInt
+		ID   example.MyInt
 		Name string
-		E    Example
-		S    SomeExample
+		E    example.Example
+		S    Example
 	}
 
-	some := SomeExample{
+	some := Example{
 		ID: 1,
 	}
 
 	fmt.Println(some)
 
 	type SameNameStruct struct {
-		Example Example
+		Example example.Example
 	}
 
 	var s SameNameStruct

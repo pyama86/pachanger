@@ -151,6 +151,26 @@ func TestTransformOtherFile(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
 	})
+
+	// deletePrefix機能を使用した際に、元のパッケージに同名の構造体が存在する場合のテスト
+	t.Run("deletePrefix機能で構造体名が被る場合のテスト", func(t *testing.T) {
+		expectedPath := filepath.Join(workDir, "expected/changed_example/delete_prefix_other_example.go")
+		outputPath := filepath.Join(workDir, "output/changed_example/other_example.go")
+		os.Remove(outputPath)
+
+		transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "Some", nil)
+		assert.NoError(t, err)
+
+		targetPath := filepath.Join(workDir, "example/other_example.go")
+		err = transformer.TransformSymbolsInTargetFile(targetPath, outputPath)
+		assert.NoError(t, err)
+		err = transformer.Dump()
+		assert.NoError(t, err)
+
+		diff, err := compareFiles(outputPath, expectedPath)
+		assert.NoError(t, err)
+		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+	})
 }
 
 func compareFiles(fileA, fileB string) (string, error) {

@@ -301,11 +301,12 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 		}
 	case *ast.Ident:
 		t.identMutex.Lock()
-		defer t.identMutex.Unlock()
 		if t.doneIdent[n] {
+			t.identMutex.Unlock()
 			slog.Debug(fmt.Sprintf("Skip Ident %s in synbol %v file:%s", n.Name, t.targetSymbols[n.Name], target))
 			return false
 		}
+		t.identMutex.Unlock()
 
 		if isTarget {
 			slog.Debug(fmt.Sprintf("Processing Ident %s in Target filePkg:%s file:%s", n.Name, filePkg, target))
@@ -367,12 +368,19 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 					} else if (t.oldPkg == filePkg || t.newPkg != filePkg) && ident.Name == t.oldPkg {
 						beforeIdent := ident.Name
 						beforeSel := n.Sel.Name
+
+						// 常に新しいパッケージ名を使用
 						ident.Name = t.newPkg
+
+						// deletePrefix を適用した後の名前
+						var newSelName string
 						if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(n.Sel.Name) {
-							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(n.Sel.Name, t.deletePrefix))
+							newSelName = strings.TrimPrefix(n.Sel.Name, t.deletePrefix)
+							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, newSelName)
 						} else {
 							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, n.Sel.Name)
 						}
+
 						slog.Debug(fmt.Sprintf("Update %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
 						return true
 					}
@@ -535,6 +543,16 @@ func (t *Transformer) isLocalDecl(e *ast.Ident, typesInfo *types.Info) bool {
 	return false
 }
 
+// ローカルスコープ内で定義された型かどうかをチェック
+func (t *Transformer) isLocalDefType(e *ast.Ident, typesInfo *types.Info) bool {
+	if obj := typesInfo.Defs[e]; obj != nil && obj.Parent() != obj.Pkg().Scope() {
+		// この識別子はローカル定義の型なので、パッケージ名を削除する
+		return true
+	}
+
+	return false
+}
+
 func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
 
 	// 同じパッケージの接頭辞がついている場合は削除
@@ -552,13 +570,19 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, e.Name), target))
 			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
 		}
+		t.addDoneList(e)
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-			e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
+			// deletePrefix を適用した後の名前
+			var newName = strings.TrimPrefix(e.Name, t.deletePrefix)
+			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, newName), target))
+			e.Name = fmt.Sprintf("%s%s", t.addPrefix, newName)
 		} else {
+			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, e.Name), target))
 			e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
 		}
+		t.addDoneList(e)
 		return true
 	}
 	return false

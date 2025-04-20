@@ -60,7 +60,14 @@ func SameNameStruct() {
 		ID   MyInt
 		Name string
 		E    Example
+		S    SomeExample
 	}
+
+	some := SomeExample{
+		ID: 1,
+	}
+
+	fmt.Println(some)
 
 	type SameNameStruct struct {
 		Example Example
