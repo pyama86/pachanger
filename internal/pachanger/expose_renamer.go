@@ -233,6 +233,9 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 	if g.execute {
 		// 実行する場合は、gopls コマンドを実行
 		cmd := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName)
+		if g.buildFlags != nil {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("GOFLAGS=%s", strings.Join(g.buildFlags, " ")))
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			slog.Error("gopls rename command failed", "error", err, "output", string(out))
