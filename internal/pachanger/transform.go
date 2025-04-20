@@ -560,7 +560,6 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, e.Name), target))
 			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
 		}
-		t.addDoneList(e)
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
