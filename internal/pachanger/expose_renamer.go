@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -233,9 +234,12 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 	if g.execute {
 		// 実行する場合は、gopls コマンドを実行
 		cmd := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName)
+		env := os.Environ()
 		if g.buildFlags != nil {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("GOFLAGS=%s", strings.Join(g.buildFlags, " ")))
+			env = append(env, fmt.Sprintf("GOFLAGS=%s", strings.Join(g.buildFlags, " ")))
 		}
+		cmd.Env = env
+
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			slog.Error("gopls rename command failed", "error", err, "output", string(out))

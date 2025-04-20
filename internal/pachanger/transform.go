@@ -591,8 +591,9 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 
 	// 変更前のパッケージで、現在のターゲットのシンボルにある場合、接頭辞を削除
 	if strings.HasPrefix(e.Name, t.oldPkg+".") && t.targetSymbols[strings.TrimPrefix(e.Name, t.oldPkg+".")] {
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, strings.TrimPrefix(e.Name, t.oldPkg+"."), target))
-		e.Name = strings.TrimPrefix(e.Name, t.oldPkg+".")
+		newName := fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(strings.TrimPrefix(e.Name, t.oldPkg+"."), t.deletePrefix))
+		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, newName, target))
+		e.Name = newName
 	}
 
 	if strings.HasPrefix(e.Name, t.oldPkg+".") && filePkg == t.oldPkg {
