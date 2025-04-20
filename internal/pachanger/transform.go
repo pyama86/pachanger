@@ -543,16 +543,6 @@ func (t *Transformer) isLocalDecl(e *ast.Ident, typesInfo *types.Info) bool {
 	return false
 }
 
-// ローカルスコープ内で定義された型かどうかをチェック
-func (t *Transformer) isLocalDefType(e *ast.Ident, typesInfo *types.Info) bool {
-	if obj := typesInfo.Defs[e]; obj != nil && obj.Parent() != obj.Pkg().Scope() {
-		// この識別子はローカル定義の型なので、パッケージ名を削除する
-		return true
-	}
-
-	return false
-}
-
 func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, filePkg string, typesInfo *types.Info) bool {
 
 	// 同じパッケージの接頭辞がついている場合は削除

@@ -232,11 +232,13 @@ func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMa
 	slog.Info("gopls rename command", "command", goplsCmd)
 	if g.execute {
 		// 実行する場合は、gopls コマンドを実行
-		_, err := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName).Output()
+		cmd := exec.Command("gopls", "rename", "-w", fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column), exportedName)
+		out, err := cmd.CombinedOutput()
 		if err != nil {
-			slog.Error("gopls rename command failed", "error", err)
+			slog.Error("gopls rename command failed", "error", err, "output", string(out))
 			return
 		}
+
 	}
 
 	if decl, ok := declMap[obj.Pos()]; ok {
