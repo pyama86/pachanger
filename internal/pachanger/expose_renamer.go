@@ -136,7 +136,7 @@ func (g *ExposeRenamer) Generate() error {
 		if obj.Pkg() == nil || !isUnexported(obj.Name()) {
 			return true
 		}
-		// ターゲットファイル外で使われていなければスキップ
+		// ターゲットファイル外で使われていない
 		if !usedOutside[obj] {
 			return true
 		}

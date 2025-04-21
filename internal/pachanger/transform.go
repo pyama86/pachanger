@@ -359,7 +359,21 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 					// 変更前か変更後のパッケージ名でアクセスしている
 					if t.newPkg == filePkg && (ident.Name == t.oldPkg || ident.Name == t.newPkg) {
 						slog.Debug(fmt.Sprintf("Delete %s in %s.%s in Other file:%s", ident.Name, ident.Name, n.Sel.Name, target))
+
+						beforeIdent := ident.Name
+						beforeSel := n.Sel.Name
+
 						ident.Name = SHOULD_BE_DELETED
+						// deletePrefix を適用した後の名前
+						var newSelName string
+						if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(n.Sel.Name) {
+							newSelName = strings.TrimPrefix(n.Sel.Name, t.deletePrefix)
+							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, newSelName)
+						} else {
+							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, n.Sel.Name)
+						}
+						slog.Debug(fmt.Sprintf("Update %s.%s -> %s in Other file:%s", beforeIdent, beforeSel, n.Sel.Name, target))
+
 						return true
 						// もとのパッケージのファイルが
 						// 変更前のパッケージ名でアクセスしている
