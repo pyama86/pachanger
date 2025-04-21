@@ -123,6 +123,16 @@ func (t *Transformer) findPackageForFile(absTargetFile string) (*ast.File, *pack
 	return nil, nil, fmt.Errorf("target file %s not found in packages", absTargetFile)
 }
 
+// transformSymbolName は、シンボル名にprefixの追加と削除を適用します
+func (t *Transformer) transformSymbolName(name string) string {
+	if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(name) && strings.HasPrefix(name, t.deletePrefix) {
+		// deletePrefix を適用した後の名前
+		name = strings.TrimPrefix(name, t.deletePrefix)
+	}
+	// addPrefix を適用
+	return fmt.Sprintf("%s%s", t.addPrefix, name)
+}
+
 func (t *Transformer) Dump() error {
 	eg := &errgroup.Group{}
 
@@ -364,14 +374,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 						beforeSel := n.Sel.Name
 
 						ident.Name = SHOULD_BE_DELETED
-						// deletePrefix を適用した後の名前
-						var newSelName string
-						if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(n.Sel.Name) {
-							newSelName = strings.TrimPrefix(n.Sel.Name, t.deletePrefix)
-							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, newSelName)
-						} else {
-							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, n.Sel.Name)
-						}
+						n.Sel.Name = t.transformSymbolName(n.Sel.Name)
 						slog.Debug(fmt.Sprintf("Update %s.%s -> %s in Other file:%s", beforeIdent, beforeSel, n.Sel.Name, target))
 
 						return true
@@ -385,15 +388,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 
 						// 常に新しいパッケージ名を使用
 						ident.Name = t.newPkg
-
-						// deletePrefix を適用した後の名前
-						var newSelName string
-						if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(n.Sel.Name) {
-							newSelName = strings.TrimPrefix(n.Sel.Name, t.deletePrefix)
-							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, newSelName)
-						} else {
-							n.Sel.Name = fmt.Sprintf("%s%s", t.addPrefix, n.Sel.Name)
-						}
+						n.Sel.Name = t.transformSymbolName(n.Sel.Name)
 
 						slog.Debug(fmt.Sprintf("Update %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
 						return true
@@ -576,15 +571,9 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 		}
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
-		if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-			// deletePrefix を適用した後の名前
-			var newName = strings.TrimPrefix(e.Name, t.deletePrefix)
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, newName), target))
-			e.Name = fmt.Sprintf("%s%s", t.addPrefix, newName)
-		} else {
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, e.Name), target))
-			e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
-		}
+		oldName := e.Name
+		e.Name = t.transformSymbolName(e.Name)
+		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", oldName, e.Name, target))
 		t.addDoneList(e)
 		return true
 	}
@@ -605,43 +594,41 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 
 	// 変更前のパッケージで、現在のターゲットのシンボルにある場合、接頭辞を削除
 	if strings.HasPrefix(e.Name, t.oldPkg+".") && t.targetSymbols[strings.TrimPrefix(e.Name, t.oldPkg+".")] {
-		newName := fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(strings.TrimPrefix(e.Name, t.oldPkg+"."), t.deletePrefix))
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, newName, target))
-		e.Name = newName
+		oldName := e.Name
+		trimmedName := strings.TrimPrefix(e.Name, t.oldPkg+".")
+		e.Name = t.transformSymbolName(trimmedName)
+		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
+		return true
 	}
 
 	if strings.HasPrefix(e.Name, t.oldPkg+".") && filePkg == t.oldPkg {
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
-		e.Name = strings.TrimPrefix(e.Name, t.oldPkg+".")
+		oldName := e.Name
+		trimmedName := strings.TrimPrefix(e.Name, t.oldPkg+".")
+		e.Name = t.transformSymbolName(trimmedName)
+		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
+		return true
 	}
 
 	if t.targetSymbols[e.Name] {
 		// 変更前のパッケージのファイル
 		if filePkg == t.oldPkg && usePkg != "" {
 			// ファイルのパッケージが新しいパッケージと異なるかつ、新しいパッケージ名で参照している場合
-			if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix)), target))
-				e.Name = fmt.Sprintf("%s.%s%s", t.newPkg, t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
-			} else {
-				slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, fmt.Sprintf("%s%s", t.addPrefix, e.Name), target))
-				e.Name = fmt.Sprintf("%s.%s", t.newPkg, fmt.Sprintf("%s%s", t.addPrefix, e.Name))
-			}
+			oldName := e.Name
+			transformedName := t.transformSymbolName(e.Name)
+			e.Name = fmt.Sprintf("%s.%s", t.newPkg, transformedName)
+			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
 			return true
 		} else {
 			// 変更前のパッケージではないファイル
 			before := e.Name
 			if usePkg == t.oldPkg {
-				if len(t.deletePrefix) > 0 && len(t.deletePrefix) < len(e.Name) {
-					e.Name = fmt.Sprintf("%s%s", t.addPrefix, strings.TrimPrefix(e.Name, t.deletePrefix))
-				} else {
-					e.Name = fmt.Sprintf("%s%s", t.addPrefix, e.Name)
-				}
+				e.Name = t.transformSymbolName(e.Name)
 				if before != e.Name {
+					slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", before, e.Name, target))
 					return true
 				}
 			}
 		}
-
 	}
 	return false
 }
