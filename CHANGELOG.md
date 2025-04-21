@@ -1,5 +1,7 @@
 # Changelog
 
+## [v0.1.3](https://github.com/pyama86/pachanger/compare/v0.1.2...v0.1.3) - 2025-04-21
+
 ## [v0.1.2](https://github.com/pyama86/pachanger/compare/v0.1.1...v0.1.2) - 2025-04-20
 - Bump golang.org/x/tools from 0.31.0 to 0.32.0 by @dependabot in https://github.com/pyama86/pachanger/pull/62
 - Bump golang.org/x/text from 0.23.0 to 0.24.0 by @dependabot in https://github.com/pyama86/pachanger/pull/61
