@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.5](https://github.com/pyama86/pachanger/compare/v0.1.4...v0.1.5) - 2025-06-11
+- Bump golang.org/x/mod from 0.24.0 to 0.25.0 by @dependabot in https://github.com/pyama86/pachanger/pull/72
+- Bump golang.org/x/sync from 0.13.0 to 0.15.0 by @dependabot in https://github.com/pyama86/pachanger/pull/71
+- Bump golang.org/x/tools from 0.32.0 to 0.34.0 by @dependabot in https://github.com/pyama86/pachanger/pull/70
+- Bump golang.org/x/text from 0.24.0 to 0.26.0 by @dependabot in https://github.com/pyama86/pachanger/pull/69
+
 ## [v0.1.4](https://github.com/pyama86/pachanger/compare/v0.1.3...v0.1.4) - 2025-04-21
 
 ## [v0.1.3](https://github.com/pyama86/pachanger/compare/v0.1.2...v0.1.3) - 2025-04-21
