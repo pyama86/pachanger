@@ -46,6 +46,8 @@ type Transformer struct {
 	allPkgs       []*packages.Package
 	identMutex    sync.Mutex
 	fileMutex     sync.Mutex
+	// エイリアス情報を格納するマップ（ファイル別）
+	aliasMap map[string]map[string]string // ファイル名 -> (エイリアス名 -> 実際のパッケージパス)
 }
 
 // NewTransformer は Transformer を生成
@@ -67,6 +69,7 @@ func NewTransformer(workDir, newPkg, addPrefix, deletePrefix string, buildFlags 
 		doneIdent:    map[*ast.Ident]bool{},
 		doneFile:     map[string]*astWithOutFile{},
 		allPkgs:      allPkgs,
+		aliasMap:     map[string]map[string]string{},
 	}, nil
 }
 
@@ -263,7 +266,64 @@ func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
 	return nil
 }
 
+// collectAliases はファイル内のimport文からエイリアス情報を収集する
+func (t *Transformer) collectAliases(filename string, file *ast.File) {
+	if t.aliasMap[filename] == nil {
+		t.aliasMap[filename] = make(map[string]string)
+	}
+
+	for _, imp := range file.Imports {
+		if imp.Name != nil {
+			// エイリアス付きimport
+			alias := imp.Name.Name
+			path := strings.Trim(imp.Path.Value, "\"")
+			t.aliasMap[filename][alias] = path
+			slog.Debug(fmt.Sprintf("Found alias import: %s -> %s in file %s", alias, path, filename))
+		}
+	}
+}
+
+// isAliasForOldPackage はエイリアス名が古いパッケージのものかチェックする
+func (t *Transformer) isAliasForOldPackage(filename, alias string) bool {
+	if aliases, ok := t.aliasMap[filename]; ok {
+		if path, exists := aliases[alias]; exists {
+			return path == t.oldPkgPath
+		}
+	}
+	return false
+}
+
+// getCorrectPackagePath はエイリアス向けの正しいパッケージパスを取得する
+func (t *Transformer) getCorrectPackagePath() string {
+	// エイリアス用の正しいパッケージパスは元のパッケージパスの最後のセグメントを置き換える
+	oldPkgSegments := strings.Split(t.oldPkgPath, "/")
+	oldPkgSegments[len(oldPkgSegments)-1] = t.newPkg
+	return strings.Join(oldPkgSegments, "/")
+}
+
+// updateAliasImports はエイリアスのimport pathを更新する
+func (t *Transformer) updateAliasImports(filename string, file *ast.File) {
+	if aliases, ok := t.aliasMap[filename]; ok {
+		for alias, path := range aliases {
+			if path == t.oldPkgPath {
+				// エイリアス用の正しいパッケージパスを使用
+				correctPkgPath := t.getCorrectPackagePath()
+				// 古いパッケージパスを削除
+				astutil.DeleteImport(t.fs, file, path)
+				// 新しいパッケージパスをエイリアス付きで追加
+				astutil.AddNamedImport(t.fs, file, alias, correctPkgPath)
+				// エイリアス情報も更新
+				t.aliasMap[filename][alias] = correctPkgPath
+				slog.Debug(fmt.Sprintf("Updated alias import: %s -> %s (as %s) in file %s", path, correctPkgPath, alias, filename))
+			}
+		}
+	}
+}
+
 func (t *Transformer) transformFile(target string, file *ast.File, typesInfo *types.Info, isTarget bool) (bool, error) {
+	// エイリアス情報を収集
+	t.collectAliases(target, file)
+
 	modified := false
 	filePkg := file.Name.Name
 	if isTarget {
@@ -281,6 +341,11 @@ func (t *Transformer) transformFile(target string, file *ast.File, typesInfo *ty
 
 		return true
 	})
+
+	// エイリアスのimportパスを更新
+	if !isTarget {
+		t.updateAliasImports(target, file)
+	}
 
 	return modified, nil
 }
@@ -337,8 +402,34 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 		}
 
 		if ident, ok := n.X.(*ast.Ident); ok {
+			// エイリアス名かチェック
+			isOldPackageAlias := t.isAliasForOldPackage(target, ident.Name)
+
+			// エイリアス名が古いパッケージを指している場合の特別処理（早期に処理）
+			if isOldPackageAlias && (t.targetSymbols[n.Sel.Name] || t.otherSymbols[n.Sel.Name]) {
+				slog.Debug(fmt.Sprintf("Processing alias %s.%s for old package in file:%s", ident.Name, n.Sel.Name, target))
+
+				if isTarget {
+					// ターゲットファイルでのエイリアス処理
+					t.addDoneList(n.Sel)
+					return false
+				} else {
+					// 他ファイルでのエイリアス処理
+					beforeIdent := ident.Name
+					beforeSel := n.Sel.Name
+
+					// エイリアス名は新しいパッケージ名に変更
+					ident.Name = t.newPkg
+					// シンボル名も変換
+					n.Sel.Name = t.transformSymbolName(n.Sel.Name)
+
+					slog.Debug(fmt.Sprintf("Update alias %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
+					return true
+				}
+			}
+
 			// 無関係なパッケージは置き換えない
-			if ident.Name != t.oldPkg && ident.Name != t.newPkg {
+			if ident.Name != t.oldPkg && ident.Name != t.newPkg && !isOldPackageAlias {
 				slog.Debug(fmt.Sprintf("Skip Selector %s.%s in synbol %v file:%s", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target))
 
 				t.addDoneList(n.Sel)
@@ -364,6 +455,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 
 			} else {
 				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Other file:%s", ident.Name, n.Sel.Name, target))
+
 				if t.targetSymbols[n.Sel.Name] {
 					// 新しいパッケージのファイルが
 					// 変更前か変更後のパッケージ名でアクセスしている
