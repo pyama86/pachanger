@@ -85,6 +85,29 @@ func TestTransformOtherFile(t *testing.T) {
 	targetPath := filepath.Join(workDir, "example/target_ok.go")
 	targetOutputPath := filepath.Join(workDir, "output/changed_example/target_ok.go")
 
+	// エイリアスimportのテスト
+	t.Run("エイリアス", func(t *testing.T) {
+		inputPath := filepath.Join(workDir, "example/alias_input.go")
+		expectedPath := filepath.Join(workDir, "expected/alias_input_expected.go")
+		outputPath := filepath.Join(workDir, "output/example/alias_input.go")
+		os.Remove(outputPath)
+
+		transformer, err := pachanger.NewTransformer(workDir, "changed_example", "", "", nil)
+		assert.NoError(t, err)
+
+		err = transformer.TransformSymbolsInTargetFile(targetPath, targetOutputPath)
+		assert.NoError(t, err)
+
+		err = transformer.TransformSymbolsInOtherFile(inputPath, outputPath)
+		assert.NoError(t, err)
+		err = transformer.Dump()
+		assert.NoError(t, err)
+
+		diff, err := compareFiles(outputPath, expectedPath)
+		assert.NoError(t, err)
+		assert.Empty(t, diff, fmt.Sprintf("Diff:\n%s", diff))
+	})
+
 	// 同じパッケージの他のファイルが変換されるパターン
 	t.Run("変更前のパッケージと同じパッケージだが別のファイルを処理したケース", func(t *testing.T) {
 		inputPath := filepath.Join(workDir, "example/other_example.go")
