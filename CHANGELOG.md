@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.1.7](https://github.com/pyama86/pachanger/compare/v0.1.6...v0.1.7) - 2025-08-14
+- Bump golang.org/x/text from 0.26.0 to 0.28.0 by @dependabot[bot] in https://github.com/pyama86/pachanger/pull/82
+
 ## [v0.1.6](https://github.com/pyama86/pachanger/compare/v0.1.5...v0.1.6) - 2025-08-10
 - 機能(エイリアス処理): エイリアスimportのサポートを追加 by @pyama86 in https://github.com/pyama86/pachanger/pull/78
 
