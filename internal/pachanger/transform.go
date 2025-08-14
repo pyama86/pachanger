@@ -46,6 +46,7 @@ type Transformer struct {
 	allPkgs       []*packages.Package
 	identMutex    sync.Mutex
 	fileMutex     sync.Mutex
+	aliasMutex    sync.Mutex
 	// エイリアス情報を格納するマップ（ファイル別）
 	aliasMap map[string]map[string]string // ファイル名 -> (エイリアス名 -> 実際のパッケージパス)
 }
@@ -268,6 +269,9 @@ func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
 
 // collectAliases はファイル内のimport文からエイリアス情報を収集する
 func (t *Transformer) collectAliases(filename string, file *ast.File) {
+	t.aliasMutex.Lock()
+	defer t.aliasMutex.Unlock()
+
 	if t.aliasMap[filename] == nil {
 		t.aliasMap[filename] = make(map[string]string)
 	}
@@ -285,6 +289,9 @@ func (t *Transformer) collectAliases(filename string, file *ast.File) {
 
 // isAliasForOldPackage はエイリアス名が古いパッケージのものかチェックする
 func (t *Transformer) isAliasForOldPackage(filename, alias string) bool {
+	t.aliasMutex.Lock()
+	defer t.aliasMutex.Unlock()
+
 	if aliases, ok := t.aliasMap[filename]; ok {
 		if path, exists := aliases[alias]; exists {
 			return path == t.oldPkgPath
@@ -303,6 +310,9 @@ func (t *Transformer) getCorrectPackagePath() string {
 
 // updateAliasImports はエイリアスのimport pathを更新する
 func (t *Transformer) updateAliasImports(filename string, file *ast.File) {
+	t.aliasMutex.Lock()
+	defer t.aliasMutex.Unlock()
+
 	if aliases, ok := t.aliasMap[filename]; ok {
 		for alias, path := range aliases {
 			if path == t.oldPkgPath {
