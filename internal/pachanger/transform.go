@@ -2,6 +2,7 @@ package pachanger
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"go/ast"
 	"go/printer"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -23,11 +25,33 @@ import (
 
 const SHOULD_BE_DELETED = "SHOULD_BE_DELETED"
 
+// debugf はデバッグレベルが有効な場合のみフォーマットを実行する
+// ASTの全ノードで呼ばれるため、無効時のfmt.Sprintfのコストを避ける
+func debugf(format string, args ...any) {
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		slog.Debug(fmt.Sprintf(format, args...))
+	}
+}
+
 type astWithOutFile struct {
 	node     *ast.File
 	output   string
 	modified bool
 	pkgName  string
+	// ターゲットファイルのみ、移動元パッケージの名前とimport pathを保持する
+	oldPkgName string
+	oldPkgPath string
+}
+
+// addImport はimportを追加する。パッケージ名がimport pathの末尾と異なる場合は
+// 名前付きimportにする。これによりgoimportsが参照を解決できず
+// モジュール全体を探索するのを防ぐ
+func (t *Transformer) addImport(node *ast.File, pkgName, pkgPath string) {
+	if pkgName != "" && path.Base(pkgPath) != pkgName {
+		astutil.AddNamedImport(t.fs, node, pkgName, pkgPath)
+	} else {
+		astutil.AddImport(t.fs, node, pkgPath)
+	}
 }
 
 type Transformer struct {
@@ -83,7 +107,31 @@ func (t *Transformer) getDoneFile(key string) *astWithOutFile {
 func (t *Transformer) setDoneFile(key string, value *astWithOutFile) {
 	t.fileMutex.Lock()
 	defer t.fileMutex.Unlock()
+	// 複数ターゲットを処理する場合、先行ターゲットで記録した情報を引き継ぐ
+	if existing, ok := t.doneFile[key]; ok {
+		if value.oldPkgPath == "" {
+			value.oldPkgName = existing.oldPkgName
+			value.oldPkgPath = existing.oldPkgPath
+		}
+		value.modified = value.modified || existing.modified
+	}
 	t.doneFile[key] = value
+}
+
+// MovedFiles は元のパスと異なる場所へ出力される処理済みファイルの一覧を返す
+// (キー: 元のファイルパス、値: 出力先パス)
+// 移動済みファイルはディスク上に元のパスが存在しないため、
+// 複数ターゲットを処理する際はこの一覧を使って変換対象に含める必要がある
+func (t *Transformer) MovedFiles() map[string]string {
+	t.fileMutex.Lock()
+	defer t.fileMutex.Unlock()
+	moved := map[string]string{}
+	for original, v := range t.doneFile {
+		if original != v.output {
+			moved[original] = v.output
+		}
+	}
+	return moved
 }
 
 func (t *Transformer) filterDefSymbols(pkg *packages.Package, absTargetFile string) (map[string]bool, map[string]bool) {
@@ -138,17 +186,25 @@ func (t *Transformer) transformSymbolName(name string) string {
 }
 
 func (t *Transformer) Dump() error {
+	// goimportsがモジュールモードで動くように、go.modのあるディレクトリで実行する
+	restore, err := chdirGoModDir(t.workDir)
+	if err != nil {
+		return err
+	}
+	defer restore()
+
 	eg := &errgroup.Group{}
+	eg.SetLimit(runtime.NumCPU())
 
 	for _, v := range t.doneFile {
 		v := v
 		eg.Go(func() error {
 			if _, err := os.Stat(v.output); err != nil || v.modified {
-				// import pathを追加
-				if t.oldPkgPath != "" && !astutil.UsesImport(v.node, t.oldPkgPath) {
-					astutil.AddImport(t.fs, v.node, t.oldPkgPath)
+				// 移動元パッケージのimport pathを追加
+				if v.oldPkgPath != "" && !astutil.UsesImport(v.node, v.oldPkgPath) {
+					t.addImport(v.node, v.oldPkgName, v.oldPkgPath)
 				}
-				if err := writeFile(t.fs, v.node, t.workDir, v.output); err != nil {
+				if err := writeFile(t.fs, v.node, v.output); err != nil {
 					return err
 				}
 			}
@@ -157,6 +213,26 @@ func (t *Transformer) Dump() error {
 
 	}
 	return eg.Wait()
+}
+
+// chdirGoModDir はworkDirの属するモジュールルートにChdirし、元に戻す関数を返す
+func chdirGoModDir(workDir string) (func(), error) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	goModDir, err := findGoModDir(workDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chdir(goModDir); err != nil {
+		return nil, fmt.Errorf("failed to change directory to %s: %w", goModDir, err)
+	}
+	return func() {
+		if err := os.Chdir(originalDir); err != nil {
+			slog.Error("failed to restore directory", slog.String("dir", originalDir), slog.Any("error", err))
+		}
+	}, nil
 }
 func findGoModDir(startDir string) (string, error) {
 	currentDir, err := filepath.Abs(startDir)
@@ -210,19 +286,20 @@ func (t *Transformer) TransformSymbolsInTargetFile(target, output string) error 
 	}
 	t.newPkgPath = path.Join(gomod.Module.Mod.Path, outputDir[len(goDir):])
 
-	slog.Debug(fmt.Sprintf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
+	debugf("load target symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath)
 
-	base := filepath.Base(target)
-	modified, err := t.transformFile(base, node, pkg.TypesInfo, true)
+	modified, err := t.transformFile(target, node, pkg.TypesInfo, true)
 	if err != nil {
 		return err
 	}
 
 	t.setDoneFile(t.fs.Position(node.Pos()).Filename, &astWithOutFile{
-		node:     node,
-		output:   output,
-		modified: modified,
-		pkgName:  t.newPkg,
+		node:       node,
+		output:     output,
+		modified:   modified,
+		pkgName:    t.newPkg,
+		oldPkgName: t.oldPkg,
+		oldPkgPath: t.oldPkgPath,
 	})
 
 	return nil
@@ -236,26 +313,25 @@ func (t *Transformer) TransformSymbolsInOtherFile(target, output string) error {
 
 	node, pkg, err := t.findPackageForFile(target)
 	if err != nil {
-		slog.Debug(fmt.Sprintf("failed to find package for file: %s", target))
+		debugf("failed to find package for file: %s", target)
 		return nil
 	}
 
-	slog.Debug(fmt.Sprintf("load other symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath))
+	debugf("load other symbol oldPkg: %s, newPkg: %s, oldPkgPath: %s, newPkgPath: %s", t.oldPkg, t.newPkg, t.oldPkgPath, t.newPkgPath)
 	if node == nil {
 		return fmt.Errorf("failed to find package for file: %w", err)
 	}
 
-	base := filepath.Base(target)
-	modified, err := t.transformFile(base, node, pkg.TypesInfo, false)
+	modified, err := t.transformFile(target, node, pkg.TypesInfo, false)
 	if err != nil {
 		return err
 	}
 
 	if modified {
-		slog.Debug(fmt.Sprintf("modified file: %s", output))
+		debugf("modified file: %s", output)
 		// import pathを追加
 		if t.newPkgPath != "" && !astutil.UsesImport(node, t.newPkgPath) {
-			astutil.AddImport(t.fs, node, t.newPkgPath)
+			t.addImport(node, t.newPkg, t.newPkgPath)
 		}
 		t.setDoneFile(t.fs.Position(node.Pos()).Filename, &astWithOutFile{
 			node:     node,
@@ -282,7 +358,7 @@ func (t *Transformer) collectAliases(filename string, file *ast.File) {
 			alias := imp.Name.Name
 			path := strings.Trim(imp.Path.Value, "\"")
 			t.aliasMap[filename][alias] = path
-			slog.Debug(fmt.Sprintf("Found alias import: %s -> %s in file %s", alias, path, filename))
+			debugf("Found alias import: %s -> %s in file %s", alias, path, filename)
 		}
 	}
 }
@@ -298,36 +374,6 @@ func (t *Transformer) isAliasForOldPackage(filename, alias string) bool {
 		}
 	}
 	return false
-}
-
-// getCorrectPackagePath はエイリアス向けの正しいパッケージパスを取得する
-func (t *Transformer) getCorrectPackagePath() string {
-	// エイリアス用の正しいパッケージパスは元のパッケージパスの最後のセグメントを置き換える
-	oldPkgSegments := strings.Split(t.oldPkgPath, "/")
-	oldPkgSegments[len(oldPkgSegments)-1] = t.newPkg
-	return strings.Join(oldPkgSegments, "/")
-}
-
-// updateAliasImports はエイリアスのimport pathを更新する
-func (t *Transformer) updateAliasImports(filename string, file *ast.File) {
-	t.aliasMutex.Lock()
-	defer t.aliasMutex.Unlock()
-
-	if aliases, ok := t.aliasMap[filename]; ok {
-		for alias, path := range aliases {
-			if path == t.oldPkgPath {
-				// エイリアス用の正しいパッケージパスを使用
-				correctPkgPath := t.getCorrectPackagePath()
-				// 古いパッケージパスを削除
-				astutil.DeleteImport(t.fs, file, path)
-				// 新しいパッケージパスをエイリアス付きで追加
-				astutil.AddNamedImport(t.fs, file, alias, correctPkgPath)
-				// エイリアス情報も更新
-				t.aliasMap[filename][alias] = correctPkgPath
-				slog.Debug(fmt.Sprintf("Updated alias import: %s -> %s (as %s) in file %s", path, correctPkgPath, alias, filename))
-			}
-		}
-	}
 }
 
 func (t *Transformer) transformFile(target string, file *ast.File, typesInfo *types.Info, isTarget bool) (bool, error) {
@@ -352,17 +398,12 @@ func (t *Transformer) transformFile(target string, file *ast.File, typesInfo *ty
 		return true
 	})
 
-	// エイリアスのimportパスを更新
-	if !isTarget {
-		t.updateAliasImports(target, file)
-	}
-
 	return modified, nil
 }
 func (t *Transformer) addDoneList(e *ast.Ident) {
 	t.identMutex.Lock()
 	defer t.identMutex.Unlock()
-	slog.Debug(fmt.Sprintf("Add DoneIdent %s", e.Name))
+	debugf("Add DoneIdent %s", e.Name)
 	t.doneIdent[e] = true
 }
 
@@ -376,7 +417,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 		if n.Names != nil {
 			for _, name := range n.Names {
 				// 構造体のフィールド名は変更しない
-				slog.Debug(fmt.Sprintf("Skip Field %s in synbol %v file:%s", name.Name, t.targetSymbols[name.Name], target))
+				debugf("Skip Field %s in synbol %v file:%s", name.Name, t.targetSymbols[name.Name], target)
 				t.addDoneList(name)
 			}
 		}
@@ -388,22 +429,22 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 		t.identMutex.Lock()
 		if t.doneIdent[n] {
 			t.identMutex.Unlock()
-			slog.Debug(fmt.Sprintf("Skip Ident %s in synbol %v file:%s", n.Name, t.targetSymbols[n.Name], target))
+			debugf("Skip Ident %s in synbol %v file:%s", n.Name, t.targetSymbols[n.Name], target)
 			return false
 		}
 		t.identMutex.Unlock()
 
 		if isTarget {
-			slog.Debug(fmt.Sprintf("Processing Ident %s in Target filePkg:%s file:%s", n.Name, filePkg, target))
+			debugf("Processing Ident %s in Target filePkg:%s file:%s", n.Name, filePkg, target)
 			return t.updateIdentInTargetFile(target, n, filePkg, typesInfo)
 		} else {
-			slog.Debug(fmt.Sprintf("Processing Ident %s in Other filePkg: %s file:%s", n.Name, filePkg, target))
+			debugf("Processing Ident %s in Other filePkg: %s file:%s", n.Name, filePkg, target)
 			return t.updateIdentInOtherFile(target, n, filePkg, typesInfo)
 		}
 
 	case *ast.SelectorExpr:
 		if nest, nestok := n.X.(*ast.SelectorExpr); nestok {
-			slog.Debug(fmt.Sprintf("Processing Nest SelectorExpr %s.%s in file:%s", nest.Sel.Name, n.Sel.Name, target))
+			debugf("Processing Nest SelectorExpr %s.%s in file:%s", nest.Sel.Name, n.Sel.Name, target)
 			t.addDoneList(nest.Sel)
 			t.addDoneList(n.Sel)
 			if t.updateExpr(target, nest, filePkg, typesInfo, isTarget) {
@@ -417,37 +458,37 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 
 			// エイリアス名が古いパッケージを指している場合の特別処理（早期に処理）
 			if isOldPackageAlias && (t.targetSymbols[n.Sel.Name] || t.otherSymbols[n.Sel.Name]) {
-				slog.Debug(fmt.Sprintf("Processing alias %s.%s for old package in file:%s", ident.Name, n.Sel.Name, target))
+				debugf("Processing alias %s.%s for old package in file:%s", ident.Name, n.Sel.Name, target)
 
-				if isTarget {
-					// ターゲットファイルでのエイリアス処理
+				if isTarget || !t.targetSymbols[n.Sel.Name] {
+					// ターゲットファイル、もしくは移動しないシンボルへのエイリアス参照は変更しない
 					t.addDoneList(n.Sel)
 					return false
-				} else {
-					// 他ファイルでのエイリアス処理
-					beforeIdent := ident.Name
-					beforeSel := n.Sel.Name
-
-					// エイリアス名は新しいパッケージ名に変更
-					ident.Name = t.newPkg
-					// シンボル名も変換
-					n.Sel.Name = t.transformSymbolName(n.Sel.Name)
-
-					slog.Debug(fmt.Sprintf("Update alias %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
-					return true
 				}
+
+				// 他ファイルで移動対象シンボルを参照している場合のみ書き換える
+				beforeIdent := ident.Name
+				beforeSel := n.Sel.Name
+
+				// エイリアス名は新しいパッケージ名に変更
+				ident.Name = t.newPkg
+				// シンボル名も変換
+				n.Sel.Name = t.transformSymbolName(n.Sel.Name)
+
+				debugf("Update alias %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target)
+				return true
 			}
 
 			// 無関係なパッケージは置き換えない
 			if ident.Name != t.oldPkg && ident.Name != t.newPkg && !isOldPackageAlias {
-				slog.Debug(fmt.Sprintf("Skip Selector %s.%s in synbol %v file:%s", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target))
+				debugf("Skip Selector %s.%s in synbol %v file:%s", ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target)
 
 				t.addDoneList(n.Sel)
 				return false
 			}
 
 			if isTarget {
-				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Target file:%s", ident.Name, n.Sel.Name, target))
+				debugf("Processing SelectorExpr %s.%s in Target file:%s", ident.Name, n.Sel.Name, target)
 				// 対象のファイルで、新しいパッケージを参照している場合
 				// パッケージ名を削除する必要がある
 				if ident.Name == t.newPkg {
@@ -464,20 +505,20 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 				}
 
 			} else {
-				slog.Debug(fmt.Sprintf("Processing SelectorExpr %s.%s in Other file:%s", ident.Name, n.Sel.Name, target))
+				debugf("Processing SelectorExpr %s.%s in Other file:%s", ident.Name, n.Sel.Name, target)
 
 				if t.targetSymbols[n.Sel.Name] {
 					// 新しいパッケージのファイルが
 					// 変更前か変更後のパッケージ名でアクセスしている
 					if t.newPkg == filePkg && (ident.Name == t.oldPkg || ident.Name == t.newPkg) {
-						slog.Debug(fmt.Sprintf("Delete %s in %s.%s in Other file:%s", ident.Name, ident.Name, n.Sel.Name, target))
+						debugf("Delete %s in %s.%s in Other file:%s", ident.Name, ident.Name, n.Sel.Name, target)
 
 						beforeIdent := ident.Name
 						beforeSel := n.Sel.Name
 
 						ident.Name = SHOULD_BE_DELETED
 						n.Sel.Name = t.transformSymbolName(n.Sel.Name)
-						slog.Debug(fmt.Sprintf("Update %s.%s -> %s in Other file:%s", beforeIdent, beforeSel, n.Sel.Name, target))
+						debugf("Update %s.%s -> %s in Other file:%s", beforeIdent, beforeSel, n.Sel.Name, target)
 
 						return true
 						// もとのパッケージのファイルが
@@ -492,11 +533,11 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 						ident.Name = t.newPkg
 						n.Sel.Name = t.transformSymbolName(n.Sel.Name)
 
-						slog.Debug(fmt.Sprintf("Update %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target))
+						debugf("Update %s.%s -> %s.%s in Other file:%s", beforeIdent, beforeSel, ident.Name, n.Sel.Name, target)
 						return true
 					}
 				} else {
-					slog.Debug(fmt.Sprintf("Skip %s in %s.%s in synbol %v in Other file:%s", ident.Name, ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target))
+					debugf("Skip %s in %s.%s in synbol %v in Other file:%s", ident.Name, ident.Name, n.Sel.Name, t.targetSymbols[n.Sel.Name], target)
 				}
 			}
 		}
@@ -526,7 +567,7 @@ func (t *Transformer) updateExpr(target string, node ast.Node, filePkg string, t
 	case *ast.KeyValueExpr:
 		// 構造体のフィールド名は変更しない
 		if ident, ok := n.Key.(*ast.Ident); ok {
-			slog.Debug(fmt.Sprintf("Skip KeyValueExpr %s in Target file:%s", ident.Name, target))
+			debugf("Skip KeyValueExpr %s in Target file:%s", ident.Name, target)
 			t.addDoneList(ident)
 		}
 	case *ast.ChanType:
@@ -658,7 +699,7 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 
 	// 同じパッケージの接頭辞がついている場合は削除
 	if strings.HasPrefix(e.Name, t.newPkg+".") {
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, strings.TrimPrefix(e.Name, t.newPkg+"."), target))
+		debugf("Update Ident %s -> %s in Target file:%s", e.Name, strings.TrimPrefix(e.Name, t.newPkg+"."), target)
 		e.Name = strings.TrimPrefix(e.Name, t.newPkg+".")
 	}
 
@@ -668,14 +709,14 @@ func (t *Transformer) updateIdentInTargetFile(target string, e *ast.Ident, fileP
 		if t.newPkg == t.oldPkg && filePkg == t.oldPkg {
 			return false
 		} else {
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, e.Name), target))
+			debugf("Update Ident %s -> %s in Target file:%s", e.Name, fmt.Sprintf("%s.%s", t.newPkg, e.Name), target)
 			e.Name = fmt.Sprintf("%s.%s", t.oldPkg, e.Name)
 		}
 		return true
 	} else if filePkg == t.oldPkg && t.targetSymbols[e.Name] {
 		oldName := e.Name
 		e.Name = t.transformSymbolName(e.Name)
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Target file:%s", oldName, e.Name, target))
+		debugf("Update Ident %s -> %s in Target file:%s", oldName, e.Name, target)
 		t.addDoneList(e)
 		return true
 	}
@@ -690,7 +731,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 
 	// ファイルと同じパッケージの接頭辞がついている場合は削除
 	if strings.HasPrefix(e.Name, t.newPkg+".") && filePkg == t.newPkg {
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", e.Name, strings.TrimPrefix(e.Name, t.newPkg+"."), target))
+		debugf("Update Ident %s -> %s in Other file:%s", e.Name, strings.TrimPrefix(e.Name, t.newPkg+"."), target)
 		e.Name = strings.TrimPrefix(e.Name, t.newPkg+".")
 	}
 
@@ -699,7 +740,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		oldName := e.Name
 		trimmedName := strings.TrimPrefix(e.Name, t.oldPkg+".")
 		e.Name = t.transformSymbolName(trimmedName)
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
+		debugf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target)
 		return true
 	}
 
@@ -707,7 +748,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 		oldName := e.Name
 		trimmedName := strings.TrimPrefix(e.Name, t.oldPkg+".")
 		e.Name = t.transformSymbolName(trimmedName)
-		slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
+		debugf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target)
 		return true
 	}
 
@@ -718,7 +759,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 			oldName := e.Name
 			transformedName := t.transformSymbolName(e.Name)
 			e.Name = fmt.Sprintf("%s.%s", t.newPkg, transformedName)
-			slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target))
+			debugf("Update Ident %s -> %s in Other file:%s", oldName, e.Name, target)
 			return true
 		} else {
 			// 変更前のパッケージではないファイル
@@ -726,7 +767,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 			if usePkg == t.oldPkg {
 				e.Name = t.transformSymbolName(e.Name)
 				if before != e.Name {
-					slog.Debug(fmt.Sprintf("Update Ident %s -> %s in Other file:%s", before, e.Name, target))
+					debugf("Update Ident %s -> %s in Other file:%s", before, e.Name, target)
 					return true
 				}
 			}
@@ -735,23 +776,7 @@ func (t *Transformer) updateIdentInOtherFile(target string, e *ast.Ident, filePk
 	return false
 }
 
-func writeFile(fs *token.FileSet, node *ast.File, workDir, output string) error {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %v", err)
-	}
-	defer func() {
-		err := os.Chdir(originalDir)
-		if err != nil {
-			fmt.Printf("failed to change directory to %s: %v\n", originalDir, err)
-		}
-	}()
-
-	dir := filepath.Dir(workDir)
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %v", dir, err)
-	}
-
+func writeFile(fs *token.FileSet, node *ast.File, output string) error {
 	var buf bytes.Buffer
 	config := &printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}
 	if err := config.Fprint(&buf, fs, node); err != nil {

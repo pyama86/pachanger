@@ -16,14 +16,13 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-var processedObjects = make(map[types.Object]bool)
-
 type ExposeRenamer struct {
-	workDir    string
-	fs         *token.FileSet
-	targetFile string
-	buildFlags []string
-	execute    bool
+	workDir          string
+	fs               *token.FileSet
+	targetFile       string
+	buildFlags       []string
+	execute          bool
+	processedObjects map[types.Object]bool
 }
 
 func NewExposeRenamer(workDir, targetFile, tagsFlag string, execute bool) (*ExposeRenamer, error) {
@@ -42,11 +41,12 @@ func NewExposeRenamer(workDir, targetFile, tagsFlag string, execute bool) (*Expo
 	}
 
 	return &ExposeRenamer{
-		workDir:    absWorkDir,
-		fs:         fs,
-		targetFile: targetFile,
-		buildFlags: buildFlags,
-		execute:    execute,
+		workDir:          absWorkDir,
+		fs:               fs,
+		targetFile:       targetFile,
+		buildFlags:       buildFlags,
+		execute:          execute,
+		processedObjects: map[types.Object]bool{},
 	}, nil
 }
 
@@ -219,10 +219,10 @@ func capitalizeFirst(s string) string {
 }
 
 func (g *ExposeRenamer) processObject(obj types.Object, info *types.Info, declMap map[token.Pos]ast.Node, usedOutside map[types.Object]bool) {
-	if processedObjects[obj] {
+	if g.processedObjects[obj] {
 		return
 	}
-	processedObjects[obj] = true
+	g.processedObjects[obj] = true
 
 	pos := g.fs.Position(obj.Pos())
 	exportedName := capitalizeFirst(obj.Name())
