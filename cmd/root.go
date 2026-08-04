@@ -209,7 +209,24 @@ func run() error {
 		// 他ファイルを並列で変換
 		g, ctx := errgroup.WithContext(ctx)
 
-		sem := make(chan struct{}, runtime.NumCPU()/2)
+		sem := make(chan struct{}, max(1, runtime.NumCPU()/2))
+
+		// 先行ターゲットで移動済みのファイルは元のパスがディスク上に存在せず
+		// WalkDirで辿れないため、記録から変換対象に加える
+		for original, output := range transformer.MovedFiles() {
+			if original == absTargetFile {
+				continue
+			}
+			original, output := original, output
+			g.Go(func() error {
+				sem <- struct{}{}
+				defer func() {
+					<-sem
+				}()
+				slog.DebugContext(ctx, "Processing moved file", slog.String("file", original))
+				return transformer.TransformSymbolsInOtherFile(original, output)
+			})
+		}
 		err = filepath.WalkDir(absWorkDir, func(path string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr

@@ -88,7 +88,12 @@ func (m *MigrateStruct) Migrate(testFile string) error {
 		return err
 	}
 	if n != nil {
-		if err := writeFile(m.fs, n, m.workDir, testFile); err != nil {
+		restore, err := chdirGoModDir(m.workDir)
+		if err != nil {
+			return err
+		}
+		defer restore()
+		if err := writeFile(m.fs, n, testFile); err != nil {
 			return err
 		}
 	}
@@ -293,18 +298,18 @@ func (m *MigrateStruct) AddConstructorWithParamsStructRefactored(
 		}
 
 		exportedName := cases.Title(language.English).String(cleanFieldName)
-		fieldsBuilder.WriteString(fmt.Sprintf("    %s %s\n", exportedName, StructDef.fields[fieldName]))
+		fmt.Fprintf(&fieldsBuilder, "    %s %s\n", exportedName, StructDef.fields[fieldName])
 	}
 
 	fieldsBuilder.WriteString("}\n\n")
 
 	var constructorBuilder strings.Builder
-	constructorBuilder.WriteString(fmt.Sprintf("func %s(params *%s) *%s {\n", constructorName, paramsStructName, nakedStructName))
-	constructorBuilder.WriteString(fmt.Sprintf("    return &%s{\n", nakedStructName))
+	fmt.Fprintf(&constructorBuilder, "func %s(params *%s) *%s {\n", constructorName, paramsStructName, nakedStructName)
+	fmt.Fprintf(&constructorBuilder, "    return &%s{\n", nakedStructName)
 
 	for _, fieldName := range StructDef.fieldList {
 		exportedName := cases.Title(language.English).String(fieldName)
-		constructorBuilder.WriteString(fmt.Sprintf("        %s: params.%s,\n", exportedName, exportedName))
+		fmt.Fprintf(&constructorBuilder, "        %s: params.%s,\n", exportedName, exportedName)
 	}
 	constructorBuilder.WriteString("    }\n")
 	constructorBuilder.WriteString("}\n")
